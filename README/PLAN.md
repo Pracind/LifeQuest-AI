@@ -86,6 +86,8 @@
 - [ ] Save reflection to DB and award base XP
 - [ ] Display XP/Level update in header
 - [ ] Write unit test for reflection endpoint
+- [ ] Enforce mandatory reflection after completing a step (cannot mark complete without reflection)
+- [ ] Update Step Completion UI to require reflection modal before completion
 
 ---
 
@@ -118,6 +120,9 @@
 - [ ] Frontend: Weekly Summary tab → shows past 7 days insights
 - [ ] Tailwind polish → clean layout, soft shadows, rounded corners
 - [ ] Manual end-to-end test (create → complete → reflect → summary)
+- [ ] AI encouragement endpoint (/user/{id}/encouragement) → summarizes past positive reflections
+- [ ] Frontend: Show encouragement popup when user fails or cancels a step
+- [ ] Use sentiment filtering + positive extraction from past reflections
 
 ---
 
