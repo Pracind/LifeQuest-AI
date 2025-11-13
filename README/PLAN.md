@@ -9,7 +9,6 @@
 - [ ] Create `README/PLAN.md` with milestones (this file)
 - [ ] Add `backend/requirements.txt` and `frontend/package.json`
 - [ ] Create GitHub repo and push initial commit
-- [ ] Set up Notion/Trello board or GitHub Projects for daily tracking
 
 ---
 
