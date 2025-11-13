@@ -1,0 +1,74 @@
+# ==========================
+#   Python / FastAPI backend
+# ==========================
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.env
+.env
+env/
+venv/
+venv*/
+instance/
+.coverage
+htmlcov/
+.cache/
+pytest_cache/
+*.db
+*.sqlite
+*.sqlite3
+
+# Migrations
+alembic/*
+!alembic/versions/
+alembic.ini
+
+# ==========================
+#   Node / React / Vite frontend
+# ==========================
+
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment
+frontend/.env
+frontend/.env.*
+!.env.example
+
+# Vite
+.vite/
+*.local
+
+# ==========================
+#   Global / OS-specific
+# ==========================
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# ==========================
+#   AWS / Artifacts
+# ==========================
+
+*.pem
+*.key
+
+# ==========================
+#   Misc
+# ==========================
+
+*.cache
+logs/
