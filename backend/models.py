@@ -1,4 +1,3 @@
-# backend/models.py
 """
 SQLAlchemy ORM models for LifeQuest AI.
 
@@ -156,7 +155,7 @@ class Evidence(Base):
     step_id = Column(String(36), ForeignKey("steps.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String(1024), nullable=False)
     url = Column(String(2048), nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta = Column("metadata", JSON, nullable=True)  # DB column still named "metadata"
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):
