@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from enum import Enum
 
 from pydantic import BaseModel, EmailStr
 
@@ -28,3 +29,38 @@ class LoginRequest(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class GoalCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+
+class Difficulty(str, Enum):
+    easy = "easy"
+    medium = "medium"
+    hard = "hard"
+
+
+class StepOut(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    position: int
+    difficulty: Difficulty
+    est_time_minutes: Optional[int] = None
+
+    class Config:
+        orm_mode = True
+
+
+class GoalOut(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    created_at: datetime
+    is_confirmed: bool
+    steps: List[StepOut] = []
+
+    class Config:
+        orm_mode = True
