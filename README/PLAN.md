@@ -34,15 +34,15 @@
 - [.] Add dependency for `get_current_user`
 
 **Day 4**
-- [ ] Implement `POST /goals` (create new goal, returns goal_id)
-- [ ] Implement `GET /goals` (list all user goals)
-- [ ] Implement `GET /goals/{id}` (returns goal + steps)
-- [ ] Write auth + goal route tests
+- [.] Implement `POST /goals` (create new goal, returns goal_id)
+- [.] Implement `GET /goals` (list all user goals)
+- [.] Implement `GET /goals/{id}` (returns goal + steps)
+- [.] Write auth + goal route tests
 
 **Day 5**
-- [ ] Implement `POST /goals/{id}/generate` (mock AI for now)
-- [ ] Implement `POST /goals/{id}/confirm` (user confirms AI-generated plan)
-- [ ] Add logging + structured error handling
+- [.] Implement `POST /goals/{id}/generate` (mock AI for now)
+- [.] Implement `POST /goals/{id}/confirm` (user confirms AI-generated plan)
+- [.] Add logging + structured error handling
 
 ---
 

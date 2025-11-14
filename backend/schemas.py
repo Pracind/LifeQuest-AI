@@ -64,3 +64,29 @@ class GoalOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+class GeneratedStep(BaseModel):
+    title: str
+    description: Optional[str] = None
+    position: int
+    difficulty: Difficulty
+    est_time_minutes: Optional[int] = None
+
+
+class GeneratePlanResponse(BaseModel):
+    goal_id: str
+    steps: List[GeneratedStep]
+
+
+class ConfirmPlanResponse(BaseModel):
+    goal_id: str
+    steps: List[StepOut]
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    message: str
+    code: int
+    path: Optional[str] = None
+
+
