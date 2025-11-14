@@ -8,6 +8,7 @@ from backend import models
 from backend.security import hash_password, verify_password, create_access_token
 from backend.deps import get_current_user
 
+from fastapi.middleware.cors import CORSMiddleware
 from backend.logging_config import logger
 
 from backend.schemas import (
@@ -26,6 +27,14 @@ from backend.schemas import (
 
 
 app = FastAPI(title="LifeQuest AI API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(HTTPException)

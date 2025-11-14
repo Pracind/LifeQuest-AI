@@ -48,10 +48,10 @@
 
 ## 💻 Days 6–7: Frontend Core (React + Vite + Tailwind)
 **Day 6**
-- [ ] Scaffold React app with Vite
-- [ ] Install Tailwind CSS
-- [ ] Build Signup/Login UI and connect to backend auth
-- [ ] Store JWT in localStorage
+- [.] Scaffold React app with Vite
+- [.] Install Tailwind CSS
+- [.] Build Signup/Login UI and connect to backend auth
+- [.] Store JWT in localStorage
 
 **Day 7**
 - [ ] Implement "Create Goal" page → calls `/goals` and `/generate`
