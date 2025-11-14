@@ -20,18 +20,18 @@
 - [.] Create `.env.example` for DB + API keys
 
 **Day 2**
-- [ ] Implement `backend/db.py` to connect to Supabase/Postgres
-- [ ] Create DB init/migration script (`create_db.py`)
-- [ ] Add demo seed data (sample user + goal)
-- [ ] Write unit test to validate DB connection and seed data
+- [.] Implement `backend/db.py` to connect to Supabase/Postgres
+- [.] Create DB init/migration script (`create_db.py`)
+- [.] Add demo seed data (sample user + goal)
+- [.] Write unit test to validate DB connection and seed data
 
 ---
 
 ## 🔐 Days 3–5: Auth & Core API (FastAPI)
 **Day 3**
-- [ ] Implement `POST /signup` (with password hashing)
-- [ ] Implement `POST /login` (returns JWT)
-- [ ] Add dependency for `get_current_user`
+- [.] Implement `POST /signup` (with password hashing)
+- [.] Implement `POST /login` (returns JWT)
+- [.] Add dependency for `get_current_user`
 
 **Day 4**
 - [ ] Implement `POST /goals` (create new goal, returns goal_id)
