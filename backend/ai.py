@@ -1,0 +1,292 @@
+"""
+AI utilities for LifeQuest AI.
+
+- Single public entrypoint: generate_plan_for_goal(title, description)
+- Supports Groq as the main provider + a mock fallback
+- Always returns a list of GeneratedStep objects
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import textwrap
+from enum import Enum
+from typing import List, Optional
+
+from pydantic import ValidationError
+
+from backend.schemas import GeneratedStep, Difficulty
+from backend.logging_config import logger
+
+# Optional Groq import (handle ImportError gracefully)
+try:
+    from groq import Groq  # type: ignore
+except ImportError:
+    Groq = None
+
+
+# ---------------------------------------------------------------------------
+# Provider selection
+# ---------------------------------------------------------------------------
+
+class AIProvider(str, Enum):
+    groq = "groq"
+    mock = "mock"
+
+
+def get_provider() -> AIProvider:
+    """
+    Decide which AI provider to use, based on:
+    - LQ_AI_PROVIDER (if set)
+    - otherwise: auto-detect based on available keys/imports
+    """
+    value = os.getenv("LQ_AI_PROVIDER")
+
+    if value:
+        try:
+            return AIProvider(value)
+        except ValueError:
+            logger.warning("AI: unknown LQ_AI_PROVIDER=%r, falling back to auto-detect", value)
+
+    # Auto-detect
+    if os.getenv("GROQ_API_KEY") and Groq is not None:
+        return AIProvider.groq
+
+    # Default to mock if nothing else is available
+    return AIProvider.mock
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _strip_code_fences(text: str) -> str:
+    """
+    If the model replies with ```json ... ``` or ``` ... ```, strip the fences
+    and return the inner JSON fragment.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Drop first line (``` or ```json)
+        lines = lines[1:]
+        # Drop last line if it looks like closing ```
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+    return text
+
+
+def _parse_steps_from_json(raw: str) -> List[GeneratedStep]:
+    """
+    Parse a JSON string of steps into a list[GeneratedStep].
+
+    Expected format: a JSON array, each item matching GeneratedStep.
+    """
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"AI output was not valid JSON: {e}") from e
+
+    if not isinstance(data, list):
+        raise ValueError("Expected a JSON list of steps")
+
+    steps: List[GeneratedStep] = []
+    for idx, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"Step {idx} was not an object")
+
+        # Ensure position is set and 1-indexed
+        item.setdefault("position", idx)
+        item.setdefault("substeps", [])
+
+        try:
+            step = GeneratedStep.model_validate(item)
+        except ValidationError as e:
+            raise ValueError(f"Step {idx} did not match schema: {e}") from e
+
+        steps.append(step)
+
+    return steps
+
+
+def _mock_plan(goal_title: str) -> List[GeneratedStep]:
+    """
+    Deterministic fallback plan used when provider is 'mock'
+    or when the real provider fails.
+
+    NOTE: no meta 'create checkpoints' steps here; all are real actions.
+    """
+    base_title = goal_title
+
+    return [
+        GeneratedStep(
+            title=f"Clarify what '{base_title}' means for you",
+            description=f"Write a short paragraph describing what success for '{base_title}' looks like.",
+            position=1,
+            difficulty=Difficulty.easy,
+            est_time_minutes=20,
+        ),
+        GeneratedStep(
+            title=f"Research the key requirements for '{base_title}'",
+            description="Spend 30–45 minutes searching for skills, constraints, and prerequisites related to this goal.",
+            position=2,
+            difficulty=Difficulty.medium,
+            est_time_minutes=40,
+        ),
+        GeneratedStep(
+            title="Identify your biggest gap",
+            description="Compare your current situation with those requirements and note the one or two biggest gaps.",
+            position=3,
+            difficulty=Difficulty.medium,
+            est_time_minutes=30,
+        ),
+        GeneratedStep(
+            title="Design your first concrete action",
+            description="Choose one small action that moves you toward closing that gap and schedule it in your calendar.",
+            position=4,
+            difficulty=Difficulty.medium,
+            est_time_minutes=30,
+        ),
+        GeneratedStep(
+            title="Do the scheduled action",
+            description="Follow through and fully complete the action you scheduled.",
+            position=5,
+            difficulty=Difficulty.hard,
+            est_time_minutes=60,
+        ),
+        GeneratedStep(
+            title="Reflect and choose the next action",
+            description="Reflect on how it went and decide on the next concrete action you’ll take.",
+            position=6,
+            difficulty=Difficulty.easy,
+            est_time_minutes=20,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Groq implementation (main one you’ll use now)
+# ---------------------------------------------------------------------------
+
+def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> List[GeneratedStep]:
+    if Groq is None:
+        raise RuntimeError("groq package is not installed")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    client = Groq(api_key=api_key)
+
+    system_prompt = (
+        "You are LifeQuest AI, an assistant that turns personal goals into "
+        "clear, linear quests. You ALWAYS respond with pure JSON only, "
+        "no explanations or extra text.\n"
+        "\n"
+        "RULES:\n"
+        "- Each step must be a concrete, highly specific physical or digital ACTION the user can perform.\n"
+        "- Each step must clearly state WHERE and HOW to do it (e.g. online resource, location, tool, website, format).\n"
+        "- Do NOT use vague verbs like “prepare”, “learn”, “research”, “improve”, “practice”, “review”. Instead, describe specific actions.\n"
+        "- No meta steps like “break into milestones” or “create a plan”.\n"
+        "- The steps MUST be executable in 25–90 minutes.\n"
+        "- Focus on guiding someone who may struggle with ambiguity (neurodivergent-friendly instructions).\n"
+        "- Example transformation:\n"
+        "BAD: 'Prepare for interview questions'\n"
+        "GOOD: 'Open Google, search “top 30 JavaScript interview questions junior level”, copy the list into a Google Doc and select 5 you want to practice'.\n"
+        "\n"
+        "Output strictly JSON of actionable checkpoints."
+    )
+
+    user_prompt = textwrap.dedent(
+        f"""
+        Turn the following goal into a sequence of as many extremely actionable steps as needed to fully complete the goal.
+        This may be anywhere from 10 to 50 steps depending on complexity.
+        Do not combine multiple actions into one step. Every step must be a standalone action.
+
+        Goal title: "{goal_title}"
+        Goal description: "{goal_description or ""}"
+
+        Each step MUST contain:
+        - title
+        - description
+        - position (integer, strictly sequential)
+        - difficulty ("easy" | "medium" | "hard")
+        - est_time_minutes
+        - substeps: 6–12 atomic micro-actions written as short commands
+
+        SUBSTEP RULES:
+        - Tell the user exactly what to do, without needing to think
+        - Include websites, apps, example search text, folder names, numbers and targets
+        - Break actions down into individual clicks / searches / typing
+        - Avoid generic verbs like “prepare”, “research”, “look into”, “improve”, “practice”, “review”
+        - Write substeps like:
+        "Open Chrome and go to https://www.indeed.com"
+        "Search for 'Junior React Developer Riga'"
+        "Filter results by 'Remote' and 'Visa Sponsorship'"
+        "Open the first job result and read the Requirements section"
+
+        SYSTEM RULES:
+        - Each step must be a concrete actionable task the user can perform
+        - No vague tasks
+        - No planning steps like “break into milestones”
+        - Output ONLY pure JSON (no text before or after)
+        """
+    ).strip()
+
+    response = client.chat.completions.create(
+        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.4,
+    )
+
+    message = response.choices[0].message
+    content = getattr(message, "content", None) or message.get("content")  # type: ignore
+
+    raw_json = _strip_code_fences(content)
+    return _parse_steps_from_json(raw_json)
+
+
+# ---------------------------------------------------------------------------
+# Public entrypoint
+# ---------------------------------------------------------------------------
+
+def generate_plan_for_goal(goal_title: str, goal_description: Optional[str]) -> List[GeneratedStep]:
+    """
+    Main function used by FastAPI routes.
+
+    - Chooses provider (Groq / mock)
+    - On any error → logs and falls back to mock plan
+    """
+    provider = get_provider()
+    logger.info("AI: using provider=%s for goal=%r", provider.value, goal_title)
+
+    try:
+        if provider == AIProvider.groq:
+            return _generate_with_groq(goal_title, goal_description)
+
+        # Explicit mock provider
+        logger.info("AI: using MOCK provider")
+        return _mock_plan(goal_title)
+
+    except Exception as exc:
+        logger.exception(
+            "AI: provider %s failed with error %r. Falling back to mock plan.",
+            provider.value,
+            exc,
+        )
+        return _mock_plan(goal_title)
+
+
+# Quick manual test (optional)
+if __name__ == "__main__":
+    steps = generate_plan_for_goal(
+        "Land a job in Latvia",
+        "Indian citizen, no EU visa yet, 2 years of experience, wants to relocate safely with a job in hand."
+    )
+    for s in steps:
+        print(s.position, s.title, f"({s.difficulty}, {s.est_time_minutes} min)")

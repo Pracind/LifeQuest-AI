@@ -54,9 +54,9 @@
 - [.] Store JWT in localStorage
 
 **Day 7**
-- [ ] Implement "Create Goal" page → calls `/goals` and `/generate`
-- [ ] Create "Goals List" page (show goals, statuses, XP)
-- [ ] Set up global layout with sidebar (Profile / XP / Level)
+- [.] Implement "Create Goal" page → calls `/goals` and `/generate`
+- [.] Create "Goals List" page (show goals, statuses, XP)
+- [.] Set up global layout with sidebar (Profile / XP / Level)
 
 ---
 

@@ -27,6 +27,7 @@ export default function LoginPage() {
       // Save token in localStorage
       localStorage.setItem("access_token", data.access_token);
       localStorage.setItem("token_type", data.token_type || "bearer");
+      localStorage.setItem("user_email", form.email);
 
       navigate("/dashboard");
     } catch (err) {

@@ -7,6 +7,7 @@ from backend.db import get_db
 from backend import models
 from backend.security import hash_password, verify_password, create_access_token
 from backend.deps import get_current_user
+from backend.ai import generate_plan_for_goal
 
 from fastapi.middleware.cors import CORSMiddleware
 from backend.logging_config import logger
@@ -208,9 +209,9 @@ def generate_goal_plan(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Mock AI generator for a goal's linear steps.
+    AI generator for a goal's linear steps.
     - Verifies goal belongs to current user
-    - Creates a fake linear plan
+    - Calls AI module to generate a plan
     - Stores it in goal.ai_plan (JSON)
     - Returns the generated steps (not yet saved as Step rows)
     """
@@ -228,56 +229,24 @@ def generate_goal_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Goal not found",
         )
+    
 
-    # --- MOCK "AI" PLAN (static, but uses goal title) ---
-    base_title = goal.title
+    # ⭐ If cached AI plan exists, return it immediately
+    if goal.ai_plan and "steps" in goal.ai_plan:
+        logger.info("AI: returning cached plan for goal %s", goal.id)
+        return GeneratePlanResponse(
+            goal_id=goal.id,
+            steps=[GeneratedStep.model_validate(s) for s in goal.ai_plan["steps"]]
+        )
 
-    fake_steps: list[GeneratedStep] = [
-        GeneratedStep(
-            title=f"Define your why for '{base_title}'",
-            description=f"Write down why {base_title.lower()} matters to you and what success looks like.",
-            position=1,
-            difficulty=Difficulty.easy,
-            est_time_minutes=15,
-        ),
-        GeneratedStep(
-            title=f"Break '{base_title}' into milestones",
-            description="Create 3–5 concrete checkpoints you can track weekly.",
-            position=2,
-            difficulty=Difficulty.medium,
-            est_time_minutes=30,
-        ),
-        GeneratedStep(
-            title="Set up your environment",
-            description="Prepare tools, calendar blocks, and remove obvious distractions.",
-            position=3,
-            difficulty=Difficulty.medium,
-            est_time_minutes=45,
-        ),
-        GeneratedStep(
-            title="Do the first deep work session",
-            description="Focus solely on this goal for at least 60 minutes.",
-            position=4,
-            difficulty=Difficulty.hard,
-            est_time_minutes=60,
-        ),
-        GeneratedStep(
-            title="Reflect and adjust your plan",
-            description="Review what worked, what didn’t, and tweak your schedule.",
-            position=5,
-            difficulty=Difficulty.easy,
-            est_time_minutes=20,
-        ),
-    ]
+    # Use AI module (Groq / OpenAI / HF / mock)
+    steps = generate_plan_for_goal(goal.title, goal.description)
 
-    # Store in goal.ai_plan for later confirmation
-    goal.ai_plan = {
-        "steps": [step.model_dump() for step in fake_steps]
-    }
+    goal.ai_plan = {"steps": [step.model_dump() for step in steps]}
     db.commit()
     db.refresh(goal)
 
-    return GeneratePlanResponse(goal_id=goal.id, steps=fake_steps)
+    return GeneratePlanResponse(goal_id=goal.id, steps=steps)
 
 
 @app.post("/goals/{goal_id}/confirm", response_model=ConfirmPlanResponse)
