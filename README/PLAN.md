@@ -76,9 +76,9 @@
 
 ## 🧭 Days 10–11: Goal Progression & Reflection Flow
 **Day 10**
-- [ ] Build Goal Detail UI → show linear list of steps, progress bar
-- [ ] Create Step Card component (title, desc, difficulty, est_time)
-- [ ] Add "Start / Reflect / Quiz / Upload / Complete" placeholders
+- [.] Build Goal Detail UI → show linear list of steps, progress bar
+- [.] Create Step Card component (title, desc, difficulty, est_time)
+- [.] Add "Start / Reflect / Quiz / Upload / Complete" placeholders
 
 **Day 11**
 - [ ] Implement `POST /goals/{id}/steps/{step_id}/reflect` (short text reflection)

@@ -238,7 +238,7 @@ def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> Lis
         - est_time_minutes
         - substeps: 6–12 atomic micro-actions written as short commands
 
-        SUBSTEP RULES:
+        SUBSTEP RULES:s
         - Tell the user exactly what to do, without needing to think
         - Include websites, apps, example search text, folder names, numbers and targets
         - Break actions down into individual clicks / searches / typing

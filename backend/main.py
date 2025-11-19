@@ -175,6 +175,11 @@ def list_goals(
         .order_by(models.Goal.created_at.desc())
         .all()
     )
+
+    for g in goals:
+        for s in g.steps:
+            if s.substeps is None:
+                s.substeps = []
     return goals
 
 

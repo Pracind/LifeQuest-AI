@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import StepCard from "../components/StepCard";
 
 export default function GoalDetailPage() {
   const { id } = useParams();
@@ -52,38 +53,7 @@ export default function GoalDetailPage() {
       <div className="space-y-4">
         {Array.isArray(goal.steps) && goal.steps.length > 0 ? (
           goal.steps.map((step) => (
-            <div key={step.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-lg">
-                  {step.position}. {step.title}
-                </h2>
-                <span className="text-xs px-2 py-1 rounded bg-slate-700">
-                  {step.difficulty}
-                </span>
-              </div>
-
-              <p className="text-sm text-slate-300 mt-1">
-                {step.description}
-              </p>
-
-              <div className="text-xs text-slate-500 mt-2">
-                Estimated time: {step.est_time_minutes} min
-              </div>
-
-              {/* Substeps */}
-              {step.substeps && step.substeps.length > 0 && (
-                <ol className="ml-5 mt-3 list-decimal text-xs text-slate-300 space-y-1">
-                  {step.substeps.map((sub, i) => (
-                    <li key={i}>{sub}</li>
-                  ))}
-                </ol>
-              )}
-
-              <button className="mt-4 text-xs px-3 py-2 border border-slate-700 rounded-md hover:bg-slate-800">
-                Start Step
-              </button>
-
-            </div>
+            <StepCard key={step.id} step={step} />
           ))
         ) : (
           <p className="text-sm text-slate-500">No steps yet</p>
