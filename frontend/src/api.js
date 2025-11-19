@@ -101,3 +101,13 @@ export async function regenerateGoalPlan(goalId) {
 
   return handleResponse(res);
 }
+
+
+export async function getUserProgress() {
+  const res = await fetch(`${API_BASE}/user/progress`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}

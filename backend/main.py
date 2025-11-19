@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List
 from backend.db import get_db
 from backend import models
@@ -21,11 +22,51 @@ from backend.schemas import (
     GoalOut,
     GeneratedStep,
     GeneratePlanResponse,
-    Difficulty,
     ConfirmPlanResponse,
     ErrorResponse,
+    ReflectionCreate,   
+    ReflectionOut,     
+    UserProgress,
 )
 
+def award_xp(
+    db: Session,
+    user_id: str,
+    amount: int,
+    reason: str,
+    meta: dict | None = None,
+) -> models.XPLog:
+    """
+    Create an XPLog entry for the user.
+    Later we can use this table to compute total XP, levels, badges, etc.
+    """
+    xp_log = models.XPLog(
+        user_id=user_id,
+        amount=amount,
+        reason=reason,
+        meta=meta or {},
+    )
+    db.add(xp_log)
+    return xp_log
+
+
+def compute_level_from_xp(total_xp: int) -> tuple[int, int, int]:
+    """
+    Very simple leveling system:
+    - Level 1 starts at 0 XP
+    - Every 100 XP → +1 level
+    Returns (level, current_level_xp, next_level_xp).
+    """
+    xp_per_level = 100
+
+    if total_xp < 0:
+        total_xp = 0
+
+    level = (total_xp // xp_per_level) + 1
+    current_level_xp = total_xp % xp_per_level
+    next_level_xp = xp_per_level
+
+    return level, current_level_xp, next_level_xp
 
 app = FastAPI(title="LifeQuest AI API")
 
@@ -135,6 +176,32 @@ def read_me(current_user: models.User = Depends(get_current_user)):
     Requires Authorization: Bearer <token>
     """
     return current_user
+
+
+@app.get("/user/progress", response_model=UserProgress)
+def get_user_progress(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Return total XP and derived level info for the current user.
+    Uses xp_log table as the source of truth.
+    """
+
+    total_xp = (
+        db.query(func.coalesce(func.sum(models.XPLog.amount), 0))
+        .filter(models.XPLog.user_id == current_user.id)
+        .scalar()
+    ) or 0
+
+    level, current_level_xp, next_level_xp = compute_level_from_xp(total_xp)
+
+    return UserProgress(
+        total_xp=total_xp,
+        level=level,
+        current_level_xp=current_level_xp,
+        next_level_xp=next_level_xp,
+    )
 
 
 @app.post("/goals", response_model=GoalOut, status_code=status.HTTP_201_CREATED)
@@ -363,4 +430,149 @@ def regenerate_goal_plan(
     return GeneratePlanResponse(goal_id=goal.id, steps=steps)
 
 
+@app.post(
+    "/goals/{goal_id}/steps/{step_id}/reflect",
+    response_model=ReflectionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_or_update_reflection(
+    goal_id: str,
+    step_id: str,
+    payload: ReflectionCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Create or update the user's reflection for a specific step.
 
+    - Ensures the goal belongs to the current user
+    - Ensures the step belongs to that goal
+    - Upserts a Reflection row (user_id + step_id)
+    - On first creation → award base XP for reflection
+    """
+
+    # 1) Ensure goal belongs to user
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not goal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Goal not found",
+        )
+
+    # 2) Ensure step belongs to that goal
+    step = (
+        db.query(models.Step)
+        .filter(
+            models.Step.id == step_id,
+            models.Step.goal_id == goal.id,
+        )
+        .first()
+    )
+    if not step:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Step not found",
+        )
+
+    # 3) Look up existing reflection (to decide XP)
+    reflection = (
+        db.query(models.Reflection)
+        .filter(
+            models.Reflection.user_id == current_user.id,
+            models.Reflection.step_id == step_id,
+        )
+        .first()
+    )
+
+    is_new = reflection is None
+
+    if reflection:
+        # Update existing
+        reflection.text = payload.text
+    else:
+        # Create new
+        reflection = models.Reflection(
+            user_id=current_user.id,
+            step_id=step_id,
+            text=payload.text,
+        )
+        db.add(reflection)
+
+    # 4) If this is a NEW reflection → award base XP
+    if is_new:
+        # XP formula (from your spec):
+        # Easy = 10 XP
+        # Medium = 20 XP
+        # Hard = 40 XP
+        # Reflection bonus = +5 XP
+
+        diff = step.difficulty  # this is a DifficultyEnum
+        if diff == models.DifficultyEnum.easy:
+            base_xp = 10
+        elif diff == models.DifficultyEnum.medium:
+            base_xp = 20
+        elif diff == models.DifficultyEnum.hard:
+            base_xp = 40
+        else:
+            base_xp = 10
+
+        total_xp = base_xp + 5  # reflection bonus
+
+        award_xp(
+            db=db,
+            user_id=current_user.id,
+            amount=total_xp,
+            reason="reflection",
+            meta={
+                "goal_id": goal_id,
+                "step_id": step_id,
+                "difficulty": diff.value if hasattr(diff, "value") else str(diff),
+                "base_xp": base_xp,
+                "reflection_bonus": 5,
+            },
+        )
+
+        logger.info(
+            "XP awarded | user=%s | goal=%s | step=%s | amount=%s",
+            current_user.id,
+            goal_id,
+            step_id,
+            total_xp,
+        )
+
+    db.commit()
+    db.refresh(reflection)
+
+    logger.info(
+        "Reflection saved | user=%s | goal=%s | step=%s | reflection_id=%s | new=%s",
+        current_user.id,
+        goal_id,
+        step_id,
+        reflection.id,
+        is_new,
+    )
+
+    return reflection
+
+
+@app.get("/xp/logs")
+def get_xp_logs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    logs = (
+        db.query(models.XPLog)
+        .filter(models.XPLog.user_id == current_user.id)
+        .order_by(models.XPLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return logs
+   

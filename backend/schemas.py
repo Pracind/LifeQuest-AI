@@ -96,3 +96,27 @@ class ErrorResponse(BaseModel):
     path: Optional[str] = None
 
 
+class ReflectionCreate(BaseModel):
+    text: str
+
+
+class ReflectionOut(BaseModel):
+    id: str
+    user_id: str
+    step_id: str
+    text: str
+    sentiment: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class UserProgress(BaseModel):
+    total_xp: int
+    level: int
+    current_level_xp: int
+    next_level_xp: int
+
+    class Config:
+        orm_mode = True

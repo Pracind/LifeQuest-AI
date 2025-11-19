@@ -1,4 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { getUserProgress } from "../api";
 
 function classNames(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -22,6 +24,39 @@ export default function AppLayout({ children }) {
     localStorage.removeItem("user_email");
     navigate("/login");
   }
+
+    const [progress, setProgress] = useState({
+    total_xp: 0,
+    level: 1,
+    current_level_xp: 0,
+    next_level_xp: 100,
+  });
+  const [loadingProgress, setLoadingProgress] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchProgress() {
+      try {
+        const data = await getUserProgress();
+        if (!cancelled) {
+          setProgress(data);
+        }
+      } catch (err) {
+        console.error("Failed to load user progress", err);
+      } finally {
+        if (!cancelled) {
+          setLoadingProgress(false);
+        }
+      }
+    }
+
+    fetchProgress();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex">
@@ -55,16 +90,36 @@ export default function AppLayout({ children }) {
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-xs">
             <div className="flex items-center justify-between mb-1">
               <span className="text-slate-400">Level</span>
-              <span className="font-semibold text-slate-50">1</span>
+              <span className="font-semibold text-slate-50">
+                {progress.level}
+              </span>
             </div>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-slate-400">XP</span>
-              <span className="font-semibold text-slate-50">0 / 100</span>
+              <span className="text-slate-400">
+                XP
+                {loadingProgress && (
+                  <span className="ml-1 text-[10px] text-slate-500">
+                    (loading…)
+                  </span>
+                )}
+              </span>
+              <span className="font-semibold text-slate-50">
+                {progress.current_level_xp} / {progress.next_level_xp}
+              </span>
             </div>
             <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-              <div className="h-full w-1/5 bg-blue-500" />
+              <div
+                className="h-full bg-blue-500 transition-all"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (progress.current_level_xp / progress.next_level_xp) * 100 || 0
+                  )}%`,
+                }}
+              />
             </div>
           </div>
+
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 text-sm">

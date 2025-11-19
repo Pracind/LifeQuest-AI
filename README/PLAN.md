@@ -81,10 +81,10 @@
 - [.] Add "Start / Reflect / Quiz / Upload / Complete" placeholders
 
 **Day 11**
-- [ ] Implement `POST /goals/{id}/steps/{step_id}/reflect` (short text reflection)
-- [ ] Save reflection to DB and award base XP
-- [ ] Display XP/Level update in header
-- [ ] Write unit test for reflection endpoint
+- [.] Implement `POST /goals/{id}/steps/{step_id}/reflect` (short text reflection)
+- [.] Save reflection to DB and award base XP
+- [.] Display XP/Level update in header
+- [.] Write unit test for reflection endpoint
 
 ---
 
