@@ -82,3 +82,22 @@ export async function getGoals() {
 
   return handleResponse(res);
 }
+
+export async function confirmGoalPlan(goalId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}/confirm`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
+
+export async function regenerateGoalPlan(goalId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}/regenerate`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}

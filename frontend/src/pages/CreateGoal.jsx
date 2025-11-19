@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createGoal, generateGoalPlan } from "../api";
+import {
+  createGoal,
+  generateGoalPlan,
+  confirmGoalPlan,
+  regenerateGoalPlan,
+} from "../api";
 
 export default function CreateGoalPage() {
   const navigate = useNavigate();
@@ -11,6 +16,9 @@ export default function CreateGoalPage() {
   const [loading, setLoading] = useState(false);
   const [steps, setSteps] = useState([]);
   const [error, setError] = useState("");
+  const [goalId, setGoalId] = useState(null);
+  const [acceptLoading, setAcceptLoading] = useState(false);
+  const [regenLoading, setRegenLoading] = useState(false);
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -22,6 +30,7 @@ export default function CreateGoalPage() {
     setError("");
     setLoading(true);
     setSteps([]);
+    setGoalId(null);
 
     try{
       // 1) Create the goal
@@ -30,10 +39,14 @@ export default function CreateGoalPage() {
         description: form.description,
       });
 
-      // 2) Call /generate for that goal
+      setGoalId(goal.id);
+
+      // 2) Call /generate for that goal (fills ai_plan, not DB steps)
       const generated = await generateGoalPlan(goal.id);
 
+      // Show generated plan (not yet confirmed)
       setSteps(generated.steps || []);
+
     } catch (err) {
       setError(err.message);
     } finally {
@@ -44,6 +57,40 @@ export default function CreateGoalPage() {
   function handleGoDashboard() {
     navigate("/dashboard");
   }
+  
+  async function handleAcceptQuest() {
+    if (!goalId) return;
+    setError("");
+    setAcceptLoading(true);
+
+    try {
+      const confirmed = await confirmGoalPlan(goalId);
+      // Use confirmed DB steps (now real quest)
+      setSteps(confirmed.steps || []);
+      // Optionally navigate to detail page to "start playing"
+      navigate(`/goals/${goalId}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAcceptLoading(false);
+    }
+  }
+
+  async function handleRegenerateQuest() {
+    if (!goalId) return;
+    setError("");
+    setRegenLoading(true);
+
+    try {
+      const regenerated = await regenerateGoalPlan(goalId);
+      setSteps(regenerated.steps || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRegenLoading(false);
+    }
+  }
+  
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -107,11 +154,32 @@ export default function CreateGoalPage() {
             </button>
           </form>
 
-          {steps.length > 0 && (
+            {steps.length > 0 && (
             <div className="mt-6">
-              <h2 className="text-sm font-semibold text-slate-200 mb-2">
-                Generated linear steps
-              </h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">
+                  Generated linear steps
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRegenerateQuest}
+                    disabled={regenLoading || loading || !goalId}
+                    className="rounded-md border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed px-3 py-1.5 text-xs text-slate-100"
+                  >
+                    {regenLoading ? "Regenerating..." : "Regenerate quest"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAcceptQuest}
+                    disabled={acceptLoading || !goalId}
+                    className="rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-medium text-white"
+                  >
+                    {acceptLoading ? "Accepting..." : "Accept quest & start"}
+                  </button>
+                </div>
+              </div>
+
               <ol className="space-y-2 text-sm">
                 {steps.map((step) => (
                   <li
@@ -151,7 +219,6 @@ export default function CreateGoalPage() {
                     )}
                   </li>
                 ))}
-
               </ol>
             </div>
           )}

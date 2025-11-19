@@ -69,6 +69,10 @@ export default function GoalsListPage() {
     navigate("/goals/new");
   }
 
+  function handleOpen(goalId) {
+  navigate(`/goals/${goalId}`);
+}
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
       <div className="w-full max-w-3xl px-4 py-8">
@@ -117,7 +121,8 @@ export default function GoalsListPage() {
               {goals.map((goal) => (
                 <li
                   key={goal.id}
-                  className="rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-3 flex flex-col gap-1"
+                  onClick={() => handleOpen(goal.id)}
+                  className="rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-3 flex flex-col gap-1 cursor-pointer hover:border-blue-500/60 hover:bg-slate-900 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -144,10 +149,15 @@ export default function GoalsListPage() {
                       {/* placeholder XP until XP system is wired */}
                       XP: 0
                     </div>
-                    {/* later: link to detailed goal view */}
-                    {/* <button className="text-[11px] text-blue-300 hover:text-blue-200">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation(); // don't trigger card click twice
+                        handleOpen(goal.id);
+                      }}
+                      className="text-[11px] text-blue-300 hover:text-blue-200"
+                    >
                       View details →
-                    </button> */}
+                    </button>
                   </div>
                 </li>
               ))}

@@ -85,6 +85,7 @@ class Step(Base):
     difficulty = Column(Enum(DifficultyEnum), default=DifficultyEnum.medium, nullable=False)
     est_time_minutes = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    substeps = Column(JSON, nullable=True)
 
     # relationships
     goal = relationship("Goal", back_populates="steps")

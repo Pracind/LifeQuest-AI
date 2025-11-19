@@ -49,7 +49,7 @@ class StepOut(BaseModel):
     position: int
     difficulty: Difficulty
     est_time_minutes: Optional[int] = None
-    substeps: List[str] = []  # ADD THIS
+    substeps: List[str] = []  
 
     class Config:
         orm_mode = True
@@ -73,7 +73,7 @@ class GeneratedStep(BaseModel):
     position: int
     difficulty: Difficulty
     est_time_minutes: Optional[int] = None
-    substeps: List[str] = []   # <--- ADD THIS
+    substeps: List[str] = []   
 
     class Config:
         orm_mode = True

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from backend.db import get_db
 from backend import models
@@ -186,6 +186,7 @@ def get_goal(
 ):
     goal = (
         db.query(models.Goal)
+        .options(joinedload(models.Goal.steps))   # <-- add this
         .filter(
             models.Goal.id == goal_id,
             models.Goal.user_id == current_user.id,
@@ -300,6 +301,7 @@ def confirm_goal_plan(
             position=step_data.get("position", 1),
             difficulty=models.DifficultyEnum(difficulty_value),
             est_time_minutes=step_data.get("est_time_minutes"),
+            substeps=step_data.get("substeps") or [],
         )
         db.add(step)
         created_steps.append(step)

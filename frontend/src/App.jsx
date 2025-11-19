@@ -5,6 +5,7 @@ import DashboardPage from "./pages/Dashboard";
 import CreateGoalPage from "./pages/CreateGoal";
 import GoalsListPage from "./pages/GoalsList";
 import AppLayout from "./components/AppLayout";
+import GoalDetailPage from "./pages/GoalDetail";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("access_token");
@@ -49,6 +50,17 @@ export default function App() {
         <RequireAuth>
           <AppLayout>
             <CreateGoalPage />
+          </AppLayout>
+        </RequireAuth>
+      }
+    />
+
+    <Route
+      path="/goals/:id"
+      element={
+        <RequireAuth>
+          <AppLayout>
+            <GoalDetailPage />
           </AppLayout>
         </RequireAuth>
       }
