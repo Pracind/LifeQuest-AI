@@ -82,8 +82,13 @@ def _parse_steps_from_json(raw: str) -> List[GeneratedStep]:
     """
     Parse a JSON string of steps into a list[GeneratedStep].
 
-    Expected format: a JSON array, each item matching GeneratedStep.
+    Validates:
+    - JSON is a list
+    - Each item is an object
+    - Each item matches GeneratedStep schema
+    - Positions are normalized to a strict 1..N linear order
     """
+
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
@@ -93,13 +98,22 @@ def _parse_steps_from_json(raw: str) -> List[GeneratedStep]:
         raise ValueError("Expected a JSON list of steps")
 
     steps: List[GeneratedStep] = []
+    
     for idx, item in enumerate(data, start=1):
         if not isinstance(item, dict):
             raise ValueError(f"Step {idx} was not an object")
+        
+        # Provide defaults / safety for missing or weird fields
+        # Position: if missing or invalid, use current index
+        position = item.get("position")
+        if not isinstance(position, int) or position <= 0:
+            item["position"] = idx
 
-        # Ensure position is set and 1-indexed
-        item.setdefault("position", idx)
-        item.setdefault("substeps", [])
+        # Substeps: ensure it's always present as a list
+        if "substeps" not in item or item["substeps"] is None:
+            item["substeps"] = []
+        elif not isinstance(item["substeps"], list):
+            raise ValueError(f"Step {idx} substeps must be a list of strings")
 
         try:
             step = GeneratedStep.model_validate(item)
@@ -107,6 +121,14 @@ def _parse_steps_from_json(raw: str) -> List[GeneratedStep]:
             raise ValueError(f"Step {idx} did not match schema: {e}") from e
 
         steps.append(step)
+        
+    
+    steps.sort(key=lambda s: s.position)
+
+    for idx, step in enumerate(steps, start=1):
+        step.position = idx
+
+    logger.info("AI: received %d steps after validation", len(steps))
 
     return steps
 
@@ -221,19 +243,18 @@ def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> Lis
         - Include websites, apps, example search text, folder names, numbers and targets
         - Break actions down into individual clicks / searches / typing
         - Avoid generic verbs like “prepare”, “research”, “look into”, “improve”, “practice”, “review”
-        - Write substeps like:
-        "Open Chrome and go to https://www.indeed.com"
-        "Search for 'Junior React Developer Riga'"
-        "Filter results by 'Remote' and 'Visa Sponsorship'"
-        "Open the first job result and read the Requirements section"
 
         SYSTEM RULES:
         - Each step must be a concrete actionable task the user can perform
         - No vague tasks
         - No planning steps like “break into milestones”
-        - Output ONLY pure JSON (no text before or after)
+        
+        Respond ONLY with a JSON array of steps.
+        The response MUST begin with '[' and end with ']'.
+        Do NOT include any explanation, commentary, or markdown fences.
         """
     ).strip()
+
 
     response = client.chat.completions.create(
         model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),

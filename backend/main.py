@@ -318,5 +318,42 @@ def confirm_goal_plan(
     return {"goal_id": goal.id, "steps": steps_db}
 
 
+@app.post("/goals/{goal_id}/regenerate", response_model=GeneratePlanResponse)
+def regenerate_goal_plan(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Regenerate an alternate AI plan for an existing goal.
+
+    - Always calls the AI provider (ignores any existing cached ai_plan)
+    - Overwrites goal.ai_plan with the new steps
+    - Does NOT modify existing Step rows (those are only changed on /confirm)
+    """
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not goal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Goal not found",
+        )
+
+    # Force a fresh AI generation (no cache)
+    steps = generate_plan_for_goal(goal.title, goal.description)
+
+    goal.ai_plan = {"steps": [s.model_dump() for s in steps]}
+    db.commit()
+    db.refresh(goal)
+
+    return GeneratePlanResponse(goal_id=goal.id, steps=steps)
+
 
 

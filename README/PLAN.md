@@ -62,15 +62,15 @@
 
 ## 🤖 Days 8–9: AI Integration (Checkpoint Generation)
 **Day 8**
-- [ ] Implement AI module (`backend/ai.py`) for provider abstraction (OpenAI / Hugging Face)
-- [ ] Add prompt template: *Goal → Linear Steps JSON output*
-- [ ] Integrate with real LLM API (use free tier/trial)
-- [ ] Cache responses in DB to limit API calls
+- [.] Implement AI module (`backend/ai.py`) for provider abstraction (OpenAI / Hugging Face)
+- [.] Add prompt template: *Goal → Linear Steps JSON output*
+- [.] Integrate with real LLM API (use free tier/trial)
+- [.] Cache responses in DB to limit API calls
 
 **Day 9**
-- [ ] Implement `/goals/{id}/regenerate` (for alternate plans)
-- [ ] Validate AI outputs (JSON schema, linear order)
-- [ ] Manual test: goal creation → AI step generation → DB save
+- [.] Implement `/goals/{id}/regenerate` (for alternate plans)
+- [.] Validate AI outputs (JSON schema, linear order)
+- [.] Manual test: goal creation → AI step generation → DB save
 
 ---
 
