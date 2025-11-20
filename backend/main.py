@@ -9,6 +9,7 @@ from backend import models
 from backend.security import hash_password, verify_password, create_access_token
 from backend.deps import get_current_user
 from backend.ai import generate_plan_for_goal
+from datetime import datetime, timezone
 
 from fastapi.middleware.cors import CORSMiddleware
 from backend.logging_config import logger
@@ -27,7 +28,92 @@ from backend.schemas import (
     ReflectionCreate,   
     ReflectionOut,     
     UserProgress,
+    StepOut,
+    XPSummary
 )
+
+MAX_LEVEL = 60
+
+
+def _build_level_requirements() -> list[int]:
+    """
+    Build XP requirements for each level-up:
+
+    index 0: XP needed from level 1 -> 2
+    index 1: XP needed from level 2 -> 3
+    ...
+    index 58: XP needed from level 59 -> 60
+
+    Rule:
+    - Level 1 -> 2: 100 XP
+    - Each next level: previous * 1.10, then rounded to the nearest 10.
+      e.g. 100, 110, 121 (~120), 133 (~130), 146.3 (~150), ...
+    """
+    requirements: list[int] = []
+    for lvl in range(1, MAX_LEVEL):  # up to 59 (since 59->60 is last)
+        if lvl == 1:
+            needed = 100.0
+        else:
+            needed = requirements[-1] * 1.10  # +10% from previous
+
+        # round to nearest 10
+        rounded = int(round(needed / 10.0) * 10)
+
+        if rounded < 10:
+            rounded = 10
+
+        requirements.append(rounded)
+
+    return requirements
+
+
+# XP needed to go from level N -> N+1
+LEVEL_XP_REQUIREMENTS: list[int] = _build_level_requirements()
+XP_TO_REACH_MAX = sum(LEVEL_XP_REQUIREMENTS)
+
+
+def compute_level_from_xp(total_xp: int) -> tuple[int, int, int, float]:
+    """
+    Convert total XP into:
+    - level (1-based)
+    - current_level_xp (XP into *current* level)
+    - next_level_xp (XP needed to go from current level -> next)
+    - progress_to_next (0.0–1.0)
+
+    Uses LEVEL_XP_REQUIREMENTS with +10% per level, rounded to nearest 10.
+    Max level is MAX_LEVEL; once reached, the bar stays full.
+    """
+    if total_xp < 0:
+        total_xp = 0
+
+    # If we've hit or exceeded the XP for max level, clamp there
+    if total_xp >= XP_TO_REACH_MAX:
+        return MAX_LEVEL, 0, 0, 1.0
+
+    level = 1
+    remaining = total_xp
+
+    # Walk through level requirements
+    for idx, needed in enumerate(LEVEL_XP_REQUIREMENTS, start=1):
+        # needed is XP to go from level idx -> idx+1
+        if remaining >= needed and level < MAX_LEVEL:
+            remaining -= needed
+            level += 1
+        else:
+            break
+
+    if level >= MAX_LEVEL:
+        return MAX_LEVEL, 0, 0, 1.0
+
+    current_level_xp = remaining
+    next_level_xp = LEVEL_XP_REQUIREMENTS[level - 1]  # index by (level-1)
+
+    progress_to_next = (
+        current_level_xp / next_level_xp if next_level_xp else 0.0
+    )
+
+    return level, current_level_xp, next_level_xp, progress_to_next
+
 
 def award_xp(
     db: Session,
@@ -50,23 +136,13 @@ def award_xp(
     return xp_log
 
 
-def compute_level_from_xp(total_xp: int) -> tuple[int, int, int]:
-    """
-    Very simple leveling system:
-    - Level 1 starts at 0 XP
-    - Every 100 XP → +1 level
-    Returns (level, current_level_xp, next_level_xp).
-    """
-    xp_per_level = 100
+def _base_xp_for_step(step: models.Step) -> int:
+    if step.difficulty == models.DifficultyEnum.easy:
+        return 10
+    if step.difficulty == models.DifficultyEnum.medium:
+        return 20
+    return 40  # hard
 
-    if total_xp < 0:
-        total_xp = 0
-
-    level = (total_xp // xp_per_level) + 1
-    current_level_xp = total_xp % xp_per_level
-    next_level_xp = xp_per_level
-
-    return level, current_level_xp, next_level_xp
 
 app = FastAPI(title="LifeQuest AI API")
 
@@ -194,7 +270,7 @@ def get_user_progress(
         .scalar()
     ) or 0
 
-    level, current_level_xp, next_level_xp = compute_level_from_xp(total_xp)
+    level, current_level_xp, next_level_xp, _ = compute_level_from_xp(total_xp)
 
     return UserProgress(
         total_xp=total_xp,
@@ -256,9 +332,22 @@ def get_goal(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """
+    Return a single goal with all steps for the current user.
+
+    - Loads steps via relationship
+    - Ensures substeps is always a list
+    - Attaches user-specific flags on each step:
+      - is_started
+      - is_completed
+      - has_reflection
+      - reflection_text
+    """
     goal = (
         db.query(models.Goal)
-        .options(joinedload(models.Goal.steps))   # <-- add this
+        .options(
+            joinedload(models.Goal.steps).joinedload(models.Step.user_steps)
+        )
         .filter(
             models.Goal.id == goal_id,
             models.Goal.user_id == current_user.id,
@@ -272,6 +361,39 @@ def get_goal(
             detail="Goal not found",
         )
 
+    for step in goal.steps:
+        # Ensure substeps is always a list
+        if step.substeps is None:
+            step.substeps = []
+
+        # Find the UserStep row for this user, if any
+        user_step = next(
+            (us for us in step.user_steps if us.user_id == current_user.id),
+            None,
+        )
+
+        # Attach user-specific flags directly to the ORM object
+        step.is_started = bool(user_step and user_step.started_at)
+        step.is_completed = bool(user_step and user_step.completed_at)
+
+        # Reflection info
+        reflection = (
+            db.query(models.Reflection)
+            .filter(
+                models.Reflection.user_id == current_user.id,
+                models.Reflection.step_id == step.id,
+            )
+            .first()
+        )
+
+        step.has_reflection = reflection is not None
+        # This is what StepCard wants to see after refresh
+        step.reflection_text = reflection.text if reflection else None
+
+        # reflection_required and reflection_prompt are real Step columns,
+        # so they are already present on `step` and will be picked up by Pydantic.
+
+    # Thanks to orm_mode / from_attributes, returning the ORM object is fine
     return goal
 
 
@@ -358,14 +480,16 @@ def confirm_goal_plan(
 
     plan_steps = goal.ai_plan["steps"]
 
-    # Clear existing steps for this goal to avoid duplicates on re-confirm
-    db.query(models.Step).filter(models.Step.goal_id == goal.id).delete(synchronize_session=False)
+    # 🔹 Clear existing steps for this goal to avoid duplicates on re-confirm
+    db.query(models.Step).filter(
+        models.Step.goal_id == goal.id
+    ).delete(synchronize_session=False)
 
     created_steps: list[models.Step] = []
 
     for step_data in plan_steps:
-        # step_data is a dict from GeneratedStep.model_dump()
         difficulty_value = step_data.get("difficulty", "medium")
+
         step = models.Step(
             goal_id=goal.id,
             title=step_data.get("title", ""),
@@ -374,6 +498,8 @@ def confirm_goal_plan(
             difficulty=models.DifficultyEnum(difficulty_value),
             est_time_minutes=step_data.get("est_time_minutes"),
             substeps=step_data.get("substeps") or [],
+            reflection_required=bool(step_data.get("reflection_required", False)),
+            reflection_prompt=step_data.get("reflection_prompt"),
         )
         db.add(step)
         created_steps.append(step)
@@ -381,7 +507,7 @@ def confirm_goal_plan(
     goal.is_confirmed = True
     db.commit()
 
-    # Reload created steps from DB in order
+    # 🔹 Reload created steps from DB in order
     steps_db = (
         db.query(models.Step)
         .filter(models.Step.goal_id == goal.id)
@@ -389,7 +515,37 @@ def confirm_goal_plan(
         .all()
     )
 
-    return {"goal_id": goal.id, "steps": steps_db}
+    # Map to StepOut for the response
+    step_out_list: list[StepOut] = []
+    for step in steps_db:
+        difficulty_value = (
+            step.difficulty.value
+            if isinstance(step.difficulty, models.DifficultyEnum)
+            else step.difficulty
+        )
+
+        step_out_list.append(
+            StepOut(
+                id=step.id,
+                title=step.title,
+                description=step.description,
+                position=step.position,
+                difficulty=difficulty_value,
+                est_time_minutes=step.est_time_minutes,
+                substeps=step.substeps or [],
+                is_started=False,
+                is_completed=False,
+                has_reflection=False,
+                reflection_required=bool(getattr(step, "reflection_required", False)),
+                reflection_prompt=getattr(step, "reflection_prompt", None),
+                reflection_text=None,
+            )
+        )
+
+    return ConfirmPlanResponse(
+        goal_id=goal.id,
+        steps=step_out_list,
+    )
 
 
 @app.post("/goals/{goal_id}/regenerate", response_model=GeneratePlanResponse)
@@ -507,45 +663,31 @@ def create_or_update_reflection(
 
     # 4) If this is a NEW reflection → award base XP
     if is_new:
-        # XP formula (from your spec):
-        # Easy = 10 XP
-        # Medium = 20 XP
-        # Hard = 40 XP
-        # Reflection bonus = +5 XP
+        reflection_xp = 5
 
-        diff = step.difficulty  # this is a DifficultyEnum
-        if diff == models.DifficultyEnum.easy:
-            base_xp = 10
-        elif diff == models.DifficultyEnum.medium:
-            base_xp = 20
-        elif diff == models.DifficultyEnum.hard:
-            base_xp = 40
-        else:
-            base_xp = 10
-
-        total_xp = base_xp + 5  # reflection bonus
+        diff = step.difficulty  # still useful for logging/meta
 
         award_xp(
             db=db,
             user_id=current_user.id,
-            amount=total_xp,
+            amount=reflection_xp,
             reason="reflection",
             meta={
                 "goal_id": goal_id,
                 "step_id": step_id,
                 "difficulty": diff.value if hasattr(diff, "value") else str(diff),
-                "base_xp": base_xp,
-                "reflection_bonus": 5,
+                "reflection_bonus": reflection_xp,
             },
         )
 
         logger.info(
-            "XP awarded | user=%s | goal=%s | step=%s | amount=%s",
+            "XP awarded | user=%s | goal=%s | step=%s | amount=%s (reflection only)",
             current_user.id,
             goal_id,
             step_id,
-            total_xp,
+            reflection_xp,
         )
+
 
     db.commit()
     db.refresh(reflection)
@@ -575,4 +717,224 @@ def get_xp_logs(
         .all()
     )
     return logs
-   
+
+
+@app.post("/goals/{goal_id}/steps/{step_id}/start")
+def start_step(
+    goal_id: str,
+    step_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # make sure goal belongs to user
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not goal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Goal not found",
+        )
+
+    step = (
+        db.query(models.Step)
+        .filter(
+            models.Step.id == step_id,
+            models.Step.goal_id == goal.id,
+        )
+        .first()
+    )
+    if not step:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Step not found",
+        )
+
+    user_step = (
+        db.query(models.UserStep)
+        .filter(
+            models.UserStep.user_id == current_user.id,
+            models.UserStep.step_id == step.id,
+        )
+        .first()
+    )
+
+    if not user_step:
+        user_step = models.UserStep(
+            user_id=current_user.id,
+            step_id=step.id,
+            started_at = datetime.now(timezone.utc),
+            xp_awarded=0,
+        )
+        db.add(user_step)
+    elif user_step.started_at is None:
+        user_step.started_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(user_step)
+
+    return {
+        "goal_id": goal.id,
+        "step_id": step.id,
+        "status": "in_progress",
+        "started_at": user_step.started_at,
+        "completed_at": user_step.completed_at,
+    }
+
+
+@app.post(
+    "/goals/{goal_id}/steps/{step_id}/complete",
+    status_code=status.HTTP_200_OK,
+)
+def complete_step(
+    goal_id: str,
+    step_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Mark a step as completed for the current user and award base XP
+    (once per step).
+
+    XP formula:
+    - easy   -> 10 XP
+    - medium -> 20 XP
+    - hard   -> 40 XP
+    """
+    # 1) Make sure goal belongs to user
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not goal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Goal not found",
+        )
+
+    # 2) Make sure step belongs to goal
+    step = (
+        db.query(models.Step)
+        .filter(
+            models.Step.id == step_id,
+            models.Step.goal_id == goal.id,
+        )
+        .first()
+    )
+    if not step:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Step not found",
+        )
+
+    # 3) Get or create UserStep (progress row)
+    user_step = (
+        db.query(models.UserStep)
+        .filter(
+            models.UserStep.user_id == current_user.id,
+            models.UserStep.step_id == step.id,
+        )
+        .first()
+    )
+
+    now_utc = datetime.now(timezone.utc)
+
+    if not user_step:
+        user_step = models.UserStep(
+            user_id=current_user.id,
+            step_id=step.id,
+            started_at=now_utc,
+            completed_at=now_utc,
+            xp_awarded=0,
+        )
+        db.add(user_step)
+        db.flush()
+    else:
+        if user_step.completed_at is None:
+            user_step.completed_at = now_utc
+
+    # 4) Check if we already gave completion XP for this step
+    existing_completion_xp = (
+        db.query(models.XPLog)
+        .filter(
+            models.XPLog.user_id == current_user.id,
+            models.XPLog.reason == "step_complete",
+            models.XPLog.meta["step_id"].as_string() == step.id,
+        )
+        .first()
+    )
+
+    xp_awarded = 0
+
+    if not existing_completion_xp:
+        # Base XP by difficulty
+        if step.difficulty == models.DifficultyEnum.easy:
+            base_xp = 10
+        elif step.difficulty == models.DifficultyEnum.medium:
+            base_xp = 20
+        elif step.difficulty == models.DifficultyEnum.hard:
+            base_xp = 40
+        else:
+            base_xp = 10
+
+        xp_log = models.XPLog(
+            user_id=current_user.id,
+            amount=base_xp,
+            reason="step_complete",
+            meta={
+                "goal_id": goal.id,
+                "step_id": step.id,
+                "difficulty": step.difficulty.value,
+                "source": "completion",
+            },
+        )
+        db.add(xp_log)
+
+        user_step.xp_awarded = (user_step.xp_awarded or 0) + base_xp
+        xp_awarded = base_xp
+
+    db.commit()
+    db.refresh(user_step)
+
+    return {
+        "status": "completed",
+        "xp_awarded": xp_awarded,
+        "step_id": step.id,
+        "goal_id": goal.id,
+    }
+
+
+@app.get("/xp/summary", response_model=XPSummary)
+def get_xp_summary(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Return total XP, level, and progress for the sidebar header.
+    """
+    total_xp = (
+        db.query(func.coalesce(func.sum(models.XPLog.amount), 0))
+        .filter(models.XPLog.user_id == current_user.id)
+        .scalar()
+    )
+
+    level, current_level_xp, next_level_xp, progress_to_next = compute_level_from_xp(
+        int(total_xp or 0)
+    )
+
+    return XPSummary(
+        total_xp=int(total_xp or 0),
+        level=level,
+        current_level_xp=current_level_xp,
+        next_level_xp=next_level_xp,
+        progress_to_next=progress_to_next,
+    )

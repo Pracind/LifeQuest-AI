@@ -1,82 +1,160 @@
-// src/components/StepCard.jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { startStep, completeStep, reflectOnStep } from "../api";
 
-// Simple heuristic: decide if this step deserves a reflection
-function isReflectionWorthy(step) {
-  // Very short, purely mechanical actions → skip
-  const title = (step.title || "").toLowerCase();
+const STATUS_IDLE = "idle";
+const STATUS_IN_PROGRESS = "in_progress";
+const STATUS_COMPLETED = "completed";
 
-  const trivialPrefixes = [
-    "open chrome",
-    "open google",
-    "open vscode",
-    "open visual studio code",
-    "install ",
-    "create a new folder",
-  ];
+export default function StepCard({ step, goalId, onStepUpdated }) {
+  const [status, setStatus] = useState(() => {
+    if (step.is_completed) return STATUS_COMPLETED;
+    if (step.is_started) return STATUS_IN_PROGRESS;
+    return STATUS_IDLE;
+  });
 
-  if (trivialPrefixes.some((p) => title.startsWith(p))) {
-    return false;
+  useEffect(() => {
+    if (step.is_completed) setStatus(STATUS_COMPLETED);
+    else if (step.is_started) setStatus(STATUS_IN_PROGRESS);
+    else setStatus(STATUS_IDLE);
+  }, [step.is_started, step.is_completed]);
+
+  const [hasReflection, setHasReflection] = useState(step.has_reflection);
+  const [reflecting, setReflecting] = useState(false);
+  const [reflectionText, setReflectionText] = useState(
+    step.reflection_text || ""
+  );
+
+  useEffect(() => {
+    setReflectionText(step.reflection_text || "");
+  }, [step.reflection_text]);
+
+  // --- Handlers with optimistic UI + patch back to parent ---------
+
+  async function handleStart() {
+    // optimistic UI: assume it works
+    setStatus(STATUS_IN_PROGRESS);
+    onStepUpdated?.({ is_started: true });
+
+    try {
+      await startStep(goalId, step.id);
+      // backend is in sync now; nothing else needed
+    } catch (err) {
+      console.error("Failed to start step", err);
+      // rollback if request fails
+      setStatus(STATUS_IDLE);
+      onStepUpdated?.({ is_started: false });
+    }
   }
 
-  // If it has a decent duration or is medium/hard, it's worth reflecting on
-  const minutes = step.est_time_minutes || 0;
-  if (minutes >= 20) return true;
-  if (["medium", "hard"].includes((step.difficulty || "").toLowerCase())) {
-    return true;
+  async function handleComplete() {
+    const prevStatus = status;
+
+    // optimistic UI
+    setStatus(STATUS_COMPLETED);
+    onStepUpdated?.({ is_started: true, is_completed: true });
+
+    try {
+      await completeStep(goalId, step.id);
+
+      // 👇 tell the rest of the app that XP has changed
+      window.dispatchEvent(new Event("xp-updated"));
+    } catch (err) {
+      console.error("Failed to complete step", err);
+      // rollback
+      setStatus(prevStatus);
+      onStepUpdated?.({ is_completed: false });
+    }
   }
 
-  // Fallback: not required
-  return false;
-}
+  async function handleSaveReflection() {
+    if (!reflectionText.trim()) return;
 
-export default function StepCard({ step }) {
-  // local UI state only for now
-  const [status, setStatus] = useState("not_started"); // "not_started" | "in_progress" | "completed"
-  const [showReflection, setShowReflection] = useState(false);
+    // optimistic UI
+    setHasReflection(true);
+    setReflecting(false);
+    onStepUpdated?.({
+      has_reflection: true,
+      reflection_text: reflectionText,
+    });
 
-  const reflectionWorthy = isReflectionWorthy(step);
+    try {
+      await reflectOnStep(goalId, step.id, reflectionText);
 
-  function handleStart() {
-    setStatus("in_progress");
-  }
-
-  function handleComplete() {
-    setStatus("completed");
-    if (reflectionWorthy) {
-      setShowReflection(true);
+      // 👇 XP also changes when you add first reflection
+      window.dispatchEvent(new Event("xp-updated"));
+    } catch (err) {
+      console.error("Failed to save reflection", err);
+      // rollback
+      setHasReflection(false);
+      onStepUpdated?.({ has_reflection: false });
     }
   }
 
   function handleOpenReflection() {
-    if (reflectionWorthy) {
-      setShowReflection(true);
+    setReflectionText(step.reflection_text || "");
+    setReflecting(true);
+  }
+
+  // --- Button rendering -------------------------------------------
+
+  function renderPrimaryButton() {
+    if (status === STATUS_IDLE) {
+      return (
+        <button
+          onClick={handleStart}
+          className="text-xs px-3 py-2 border border-slate-700 rounded-md hover:bg-slate-800"
+        >
+          Start
+        </button>
+      );
     }
-  }
 
-  function handleCloseReflection() {
-    setShowReflection(false);
-  }
+    if (status === STATUS_IN_PROGRESS) {
+      return (
+        <button
+          onClick={handleComplete}
+          className="text-xs px-3 py-2 border border-emerald-600 bg-emerald-600/10 rounded-md hover:bg-emerald-600/20"
+        >
+          Mark Complete
+        </button>
+      );
+    }
 
-  // Button visibility logic
-  const showStartButton = status === "not_started";
-  const showCompleteButton = status === "in_progress";
-  const showReflectButton = status === "completed" && reflectionWorthy;
+    if (status === STATUS_COMPLETED) {
+      // If this step doesn't need reflection, just show Done
+      if (!step.reflection_required) {
+        return (
+          <span className="text-xs px-3 py-2 border border-slate-700 rounded-md text-slate-300">
+            Done
+          </span>
+        );
+      }
+
+      return (
+        <button
+          onClick={handleOpenReflection}
+          className="text-xs px-3 py-2 border border-blue-600 bg-blue-600/10 rounded-md hover:bg-blue-600/20"
+        >
+          {hasReflection ? "Edit reflection" : "Reflect"}
+        </button>
+      );
+    }
+
+    return null;
+  }
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 relative">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-lg">
           {step.position}. {step.title}
         </h2>
-        <span className="text-xs px-2 py-1 rounded bg-slate-700">
+        <span className="text-xs px-2 py-1 rounded bg-slate-700 capitalize">
           {step.difficulty}
         </span>
       </div>
 
-      <p className="text-sm text-slate-300 mt-1">
-        {step.description}
-      </p>
+      <p className="text-sm text-slate-300 mt-1">{step.description}</p>
 
       <div className="text-xs text-slate-500 mt-2">
         Estimated time: {step.est_time_minutes} min
@@ -90,80 +168,45 @@ export default function StepCard({ step }) {
         </ol>
       )}
 
-      {/* Action buttons depending on status */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {showStartButton && (
-          <button
-            type="button"
-            onClick={handleStart}
-            className="text-xs px-3 py-1.5 rounded-md border border-blue-500/70 text-blue-100 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
-          >
-            Start
-          </button>
-        )}
+      <div className="mt-4 flex gap-2 items-center">
+        {renderPrimaryButton()}
 
-        {showCompleteButton && (
-          <button
-            type="button"
-            onClick={handleComplete}
-            className="text-xs px-3 py-1.5 rounded-md border border-emerald-500/70 text-emerald-100 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors"
-          >
-            Complete
-          </button>
+        {hasReflection && (
+          <span className="text-[11px] text-emerald-400">
+            + XP awarded for reflection
+          </span>
         )}
-
-        {showReflectButton && (
-          <button
-            type="button"
-            onClick={handleOpenReflection}
-            className="text-xs px-3 py-1.5 rounded-md border border-amber-500/70 text-amber-100 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
-          >
-            Reflect
-          </button>
-        )}
-
-        <span className="ml-auto text-[10px] text-slate-500">
-          status: {status}
-        </span>
       </div>
 
-      {/* Reflection modal (UI-only for now, AI later) */}
-      {showReflection && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-xl p-5 shadow-2xl">
-            <h3 className="text-sm font-semibold text-slate-100 mb-2">
-              Quick reflection on this step
-            </h3>
-            <p className="text-xs text-slate-300 mb-3">
-              {/* For now this is a static prompt; later we’ll fetch it from the AI. */}
-              Thinking about: <span className="font-medium">{step.title}</span>
-            </p>
-            <p className="text-xs text-slate-300 mb-4">
-              What felt most challenging or surprising about doing this step?
-              What would you do differently next time?
-            </p>
-
-            <textarea
-              className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3 min-h-[80px]"
-              placeholder="Type your reflection here (optional for now)..."
-            />
-
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleCloseReflection}
-                className="text-xs px-3 py-1.5 rounded-md border border-slate-600 text-slate-200 hover:bg-slate-800"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={handleCloseReflection}
-                className="text-xs px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white rounded-md"
-              >
-                Save (placeholder)
-              </button>
-            </div>
+      {reflecting && (
+        <div className="mt-4 border border-slate-700 rounded-lg p-3 bg-slate-950/80">
+          <label className="text-xs text-slate-300 block mb-1">
+            {step.reflection_prompt || "Reflection"}
+          </label>
+          <textarea
+            className="w-full text-xs bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-slate-100"
+            rows={3}
+            value={reflectionText}
+            onChange={(e) => setReflectionText(e.target.value)}
+            placeholder="Write your reflection here..."
+          />
+          <div className="mt-2 flex gap-2 justify-end">
+            <button
+              onClick={() => {
+                setReflecting(false);
+                // revert to last saved reflection from backend/parent
+                setReflectionText(step.reflection_text || "");
+              }}
+              className="text-[11px] px-2 py-1 rounded border border-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveReflection}
+              className="text-[11px] px-3 py-1 rounded bg-blue-600 hover:bg-blue-500"
+            >
+              Save reflection
+            </button>
           </div>
         </div>
       )}

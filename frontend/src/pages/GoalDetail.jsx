@@ -1,35 +1,68 @@
+// src/pages/GoalDetailPage.jsx
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import StepCard from "../components/StepCard";
+import { getGoal } from "../api";
 
 export default function GoalDetailPage() {
   const { id } = useParams();
   const [goal, setGoal] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function fetchGoal() {
-      const token = localStorage.getItem("access_token");
-      const res = await fetch(`http://localhost:8000/goals/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+  function handleStepLocallyUpdated(stepId, patch) {
+    setGoal((prev) => {
+      if (!prev) return prev;
 
-      const data = await res.json();
+      const updatedSteps = (prev.steps || []).map((s) =>
+        s.id === stepId ? { ...s, ...patch } : s
+      );
+
+      return {
+        ...prev,
+        steps: updatedSteps,
+      };
+    });
+  }
+
+  async function loadGoal() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await getGoal(id);
+      console.log("Loaded goal detail:", data); // 👈 see exactly what backend sends
       setGoal(data);
+    } catch (err) {
+      console.error("Failed to load goal", err);
+      setError(err.message || "Failed to load goal");
+      setGoal(null);
+    } finally {
       setLoading(false);
     }
+  }
 
-    fetchGoal();
+  useEffect(() => {
+    loadGoal();
   }, [id]);
 
   if (loading) return <div>Loading goal...</div>;
+  if (error) return <div className="text-red-300 text-sm">{error}</div>;
   if (!goal) return <div>Goal not found</div>;
 
-  const completedCount = 0;
-  const totalSteps = Array.isArray(goal.steps) ? goal.steps.length : 0;
-  const progress = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+  // --- Progress calculation ---
+  const steps = Array.isArray(goal.steps) ? goal.steps : [];
+
+  const completedCount = steps.filter((s) => {
+    if (typeof s.is_completed === "boolean") return s.is_completed;
+    if (typeof s.completed === "boolean") return s.completed;
+    if (typeof s.status === "string") return s.status === "completed";
+    return false;
+  }).length;
+
+  const totalSteps = steps.length;
+  const progress =
+    totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -37,6 +70,7 @@ export default function GoalDetailPage() {
         <h1 className="text-2xl font-bold">{goal.title}</h1>
       </div>
 
+      {/* Progress bar */}
       <div>
         <div className="flex justify-between text-sm mb-1">
           <span>Progress</span>
@@ -50,10 +84,18 @@ export default function GoalDetailPage() {
         </div>
       </div>
 
+      {/* Steps */}
       <div className="space-y-4">
-        {Array.isArray(goal.steps) && goal.steps.length > 0 ? (
-          goal.steps.map((step) => (
-            <StepCard key={step.id} step={step} />
+        {steps.length > 0 ? (
+          steps.map((step) => (
+            <StepCard
+              key={step.id}
+              step={step}
+              goalId={goal.id}
+              onStepUpdated={(patch) =>
+                handleStepLocallyUpdated(step.id, patch)
+              }
+            />
           ))
         ) : (
           <p className="text-sm text-slate-500">No steps yet</p>

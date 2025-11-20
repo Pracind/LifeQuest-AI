@@ -87,6 +87,9 @@ class Step(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     substeps = Column(JSON, nullable=True)
 
+    reflection_required = Column(Boolean, default=False, nullable=False)
+    reflection_prompt = Column(Text, nullable=True)
+
     # relationships
     goal = relationship("Goal", back_populates="steps")
     user_steps = relationship("UserStep", back_populates="step", cascade="all, delete-orphan")

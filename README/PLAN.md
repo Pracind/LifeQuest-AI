@@ -88,7 +88,7 @@
 
 ---
 
-## 🧩 Day 12: Micro-Quiz Flow (Knowledge Verification)
+## 🧩 Day 12: Micro-Quiz Flow (Knowledge Verification) (skipping for now)
 - [ ] Implement backend `/steps/{id}/quiz` → generates 2–3 MCQs (via AI)
 - [ ] Store quiz + hashed correct answers in DB
 - [ ] Create Quiz Modal in React, display questions, verify answers

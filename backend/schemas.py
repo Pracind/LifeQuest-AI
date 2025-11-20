@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 class UserCreate(BaseModel):
@@ -49,10 +49,19 @@ class StepOut(BaseModel):
     position: int
     difficulty: Difficulty
     est_time_minutes: Optional[int] = None
-    substeps: List[str] = []  
 
-    class Config:
-        orm_mode = True
+    substeps: List[str] = []  
+    is_started: bool = False
+    is_completed: bool = False
+    has_reflection: bool = False
+
+    reflection_required: bool = False
+    reflection_prompt: Optional[str] = None
+
+    reflection_text: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes = True)
+    
 
 
 
@@ -74,6 +83,9 @@ class GeneratedStep(BaseModel):
     difficulty: Difficulty
     est_time_minutes: Optional[int] = None
     substeps: List[str] = []   
+
+    reflection_required: bool = False
+    reflection_prompt: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -120,3 +132,10 @@ class UserProgress(BaseModel):
 
     class Config:
         orm_mode = True
+
+class XPSummary(BaseModel):
+    total_xp: int
+    level: int
+    current_level_xp: int
+    next_level_xp: int
+    progress_to_next: float

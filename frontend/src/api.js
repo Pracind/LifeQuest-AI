@@ -83,6 +83,17 @@ export async function getGoals() {
   return handleResponse(res);
 }
 
+
+export async function getGoal(goalId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
+
 export async function confirmGoalPlan(goalId) {
   const res = await fetch(`${API_BASE}/goals/${goalId}/confirm`, {
     method: "POST",
@@ -105,6 +116,47 @@ export async function regenerateGoalPlan(goalId) {
 
 export async function getUserProgress() {
   const res = await fetch(`${API_BASE}/user/progress`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
+
+export async function startStep(goalId, stepId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}/steps/${stepId}/start`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+
+export async function completeStep(goalId, stepId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}/steps/${stepId}/complete`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+
+export async function reflectOnStep(goalId, stepId, text) {
+  const res = await fetch(
+    `${API_BASE}/goals/${goalId}/steps/${stepId}/reflect`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ text }),
+    }
+  );
+  return handleResponse(res);
+}
+
+
+export async function getXpSummary() {
+  const res = await fetch(`${API_BASE}/xp/summary`, {
     method: "GET",
     headers: authHeaders(),
   });

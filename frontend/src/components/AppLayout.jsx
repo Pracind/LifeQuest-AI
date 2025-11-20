@@ -1,6 +1,6 @@
-import { NavLink, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { getUserProgress } from "../api";
+import { NavLink, useNavigate } from "react-router-dom";
+import { getXpSummary } from "../api";
 
 function classNames(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -9,8 +9,49 @@ function classNames(...classes) {
 export default function AppLayout({ children }) {
   const navigate = useNavigate();
   const email = localStorage.getItem("user_email") || "adventurer@lifequest.ai";
-
   const initials = email[0]?.toUpperCase() || "L";
+
+  const [xpState, setXpState] = useState({
+    loading: true,
+    level: 1,
+    current_level_xp: 0,
+    next_level_xp: 100,
+    progress_to_next: 0,
+  });
+
+  async function loadXp() {
+    try {
+      const data = await getXpSummary();
+
+      setXpState({
+        loading: false,
+        level: data.level,
+        current_level_xp: data.current_level_xp,
+        next_level_xp: data.next_level_xp,
+        progress_to_next: data.progress_to_next,
+      });
+    } catch (err) {
+      console.error("Failed to load XP summary:", err);
+      // Stop loading but keep whatever we had
+      setXpState((prev) => ({ ...prev, loading: false }));
+    }
+  }
+
+  useEffect(() => {
+    loadXp();
+  }, []);
+
+  // listen for "xp-updated" from StepCard and refresh XP
+  useEffect(() => {
+    function handleXpUpdated() {
+      loadXp();
+    }
+
+    window.addEventListener("xp-updated", handleXpUpdated);
+    return () => window.removeEventListener("xp-updated", handleXpUpdated);
+  }, []);
+
+  
 
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
@@ -25,38 +66,13 @@ export default function AppLayout({ children }) {
     navigate("/login");
   }
 
-    const [progress, setProgress] = useState({
-    total_xp: 0,
-    level: 1,
-    current_level_xp: 0,
-    next_level_xp: 100,
-  });
-  const [loadingProgress, setLoadingProgress] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchProgress() {
-      try {
-        const data = await getUserProgress();
-        if (!cancelled) {
-          setProgress(data);
-        }
-      } catch (err) {
-        console.error("Failed to load user progress", err);
-      } finally {
-        if (!cancelled) {
-          setLoadingProgress(false);
-        }
-      }
-    }
-
-    fetchProgress();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const levelLabel = xpState.loading ? "..." : xpState.level;
+  const xpLabel = xpState.loading
+    ? "..."
+    : `${xpState.current_level_xp} / ${xpState.next_level_xp}`;
+  const xpPercent = xpState.loading
+    ? 0
+    : Math.round((xpState.progress_to_next || 0) * 100);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex">
@@ -87,39 +103,23 @@ export default function AppLayout({ children }) {
             </div>
           </div>
 
+          {/* XP / Level card */}
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-xs">
             <div className="flex items-center justify-between mb-1">
               <span className="text-slate-400">Level</span>
-              <span className="font-semibold text-slate-50">
-                {progress.level}
-              </span>
+              <span className="font-semibold text-slate-50">{levelLabel}</span>
             </div>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-slate-400">
-                XP
-                {loadingProgress && (
-                  <span className="ml-1 text-[10px] text-slate-500">
-                    (loading…)
-                  </span>
-                )}
-              </span>
-              <span className="font-semibold text-slate-50">
-                {progress.current_level_xp} / {progress.next_level_xp}
-              </span>
+              <span className="text-slate-400">XP</span>
+              <span className="font-semibold text-slate-50">{xpLabel}</span>
             </div>
             <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
               <div
                 className="h-full bg-blue-500 transition-all"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    (progress.current_level_xp / progress.next_level_xp) * 100 || 0
-                  )}%`,
-                }}
+                style={{ width: `${xpPercent}%` }}
               />
             </div>
           </div>
-
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 text-sm">

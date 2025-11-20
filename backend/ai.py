@@ -134,12 +134,6 @@ def _parse_steps_from_json(raw: str) -> List[GeneratedStep]:
 
 
 def _mock_plan(goal_title: str) -> List[GeneratedStep]:
-    """
-    Deterministic fallback plan used when provider is 'mock'
-    or when the real provider fails.
-
-    NOTE: no meta 'create checkpoints' steps here; all are real actions.
-    """
     base_title = goal_title
 
     return [
@@ -149,6 +143,8 @@ def _mock_plan(goal_title: str) -> List[GeneratedStep]:
             position=1,
             difficulty=Difficulty.easy,
             est_time_minutes=20,
+            reflection_required=True,
+            reflection_prompt="After writing your definition of success, what surprised you or felt most important?"
         ),
         GeneratedStep(
             title=f"Research the key requirements for '{base_title}'",
@@ -156,27 +152,18 @@ def _mock_plan(goal_title: str) -> List[GeneratedStep]:
             position=2,
             difficulty=Difficulty.medium,
             est_time_minutes=40,
+            reflection_required=True,
+            reflection_prompt="What did you learn about the gap between where you are now and these requirements?"
         ),
-        GeneratedStep(
-            title="Identify your biggest gap",
-            description="Compare your current situation with those requirements and note the one or two biggest gaps.",
-            position=3,
-            difficulty=Difficulty.medium,
-            est_time_minutes=30,
-        ),
-        GeneratedStep(
-            title="Design your first concrete action",
-            description="Choose one small action that moves you toward closing that gap and schedule it in your calendar.",
-            position=4,
-            difficulty=Difficulty.medium,
-            est_time_minutes=30,
-        ),
+        # ... some steps might not need reflection:
         GeneratedStep(
             title="Do the scheduled action",
             description="Follow through and fully complete the action you scheduled.",
             position=5,
             difficulty=Difficulty.hard,
             est_time_minutes=60,
+            reflection_required=True,
+            reflection_prompt="What did you notice about your energy, emotions, or resistance while doing this action?"
         ),
         GeneratedStep(
             title="Reflect and choose the next action",
@@ -184,12 +171,14 @@ def _mock_plan(goal_title: str) -> List[GeneratedStep]:
             position=6,
             difficulty=Difficulty.easy,
             est_time_minutes=20,
+            reflection_required=True,
+            reflection_prompt="What worked well, what didn’t, and what will you change in your next action?"
         ),
     ]
 
 
 # ---------------------------------------------------------------------------
-# Groq implementation (main one you’ll use now)
+# Groq implementation (main one)
 # ---------------------------------------------------------------------------
 
 def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> List[GeneratedStep]:
@@ -209,14 +198,14 @@ def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> Lis
         "\n"
         "RULES:\n"
         "- Each step must be a concrete, highly specific physical or digital ACTION the user can perform.\n"
-        "- Each step must clearly state WHERE and HOW to do it (e.g. online resource, location, tool, website, format).\n"
-        "- Do NOT use vague verbs like “prepare”, “learn”, “research”, “improve”, “practice”, “review”. Instead, describe specific actions.\n"
-        "- No meta steps like “break into milestones” or “create a plan”.\n"
+        "- Each step must clearly state WHERE and HOW to do it.\n"
         "- The steps MUST be executable in 25–90 minutes.\n"
-        "- Focus on guiding someone who may struggle with ambiguity (neurodivergent-friendly instructions).\n"
-        "- Example transformation:\n"
-        "BAD: 'Prepare for interview questions'\n"
-        "GOOD: 'Open Google, search “top 30 JavaScript interview questions junior level”, copy the list into a Google Doc and select 5 you want to practice'.\n"
+        "- Avoid vague verbs.\n"
+        "- Additionally, you must decide if each step is reflection-worthy:\n"
+        "  - reflection_required = true ONLY for steps where the user learns something, faces difficulty, makes a decision, or might change strategy.\n"
+        "  - reflection_required = false for trivial or purely mechanical steps (e.g. 'open VS Code', 'create folder', 'install tool').\n"
+        "- For reflection-worthy steps, write reflection_prompt as a single, concrete question that helps the user extract value from that action.\n"
+        "- For non-reflection-worthy steps, set reflection_required = false and reflection_prompt = null.\n"
         "\n"
         "Output strictly JSON of actionable checkpoints."
     )
@@ -237,6 +226,8 @@ def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> Lis
         - difficulty ("easy" | "medium" | "hard")
         - est_time_minutes
         - substeps: 6–12 atomic micro-actions written as short commands
+        - reflection_required: true or false
+        - reflection_prompt: a single, specific reflection question if reflection_required is true, otherwise null
 
         SUBSTEP RULES:s
         - Tell the user exactly what to do, without needing to think
