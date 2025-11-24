@@ -6,6 +6,7 @@ import CreateGoalPage from "./pages/CreateGoal";
 import GoalsListPage from "./pages/GoalsList";
 import AppLayout from "./components/AppLayout";
 import GoalDetailPage from "./pages/GoalDetail";
+import CompletedQuestsPage from "./pages/CompletedQuestPage";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("access_token");
@@ -33,16 +34,6 @@ export default function App() {
       }
     />
 
-    <Route
-      path="/goals"
-      element={
-        <RequireAuth>
-          <AppLayout>
-            <GoalsListPage />
-          </AppLayout>
-        </RequireAuth>
-      }
-    />
 
     <Route
       path="/goals/new"
@@ -55,6 +46,28 @@ export default function App() {
       }
     />
 
+
+    <Route
+      path="/goals"
+      element={
+        <RequireAuth>
+          <AppLayout>
+            <GoalsListPage />
+          </AppLayout>
+        </RequireAuth>
+      }
+    />
+
+    <Route
+      path="/goals/completed"
+      element={
+        <AppLayout>
+          <CompletedQuestsPage />
+        </AppLayout>
+      }
+    />
+
+
     <Route
       path="/goals/:id"
       element={
@@ -65,6 +78,7 @@ export default function App() {
         </RequireAuth>
       }
     />
+
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>
   );

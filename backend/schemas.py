@@ -57,10 +57,13 @@ class StepOut(BaseModel):
 
     reflection_required: bool = False
     reflection_prompt: Optional[str] = None
-
     reflection_text: Optional[str] = None
 
-    model_config = ConfigDict(from_attributes = True)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
     
 
 
@@ -71,6 +74,8 @@ class GoalOut(BaseModel):
     description: Optional[str] = None
     created_at: datetime
     is_confirmed: bool
+    completed_at: datetime | None = None 
+    completion_summary: str | None = None
     steps: List[StepOut] = []
 
     class Config:
@@ -139,3 +144,8 @@ class XPSummary(BaseModel):
     current_level_xp: int
     next_level_xp: int
     progress_to_next: float
+
+
+class GoalCompletionSummary(BaseModel):
+    goal_id: str
+    summary_text: str

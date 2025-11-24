@@ -54,9 +54,10 @@ export default function AppLayout({ children }) {
   
 
   const navItems = [
-    { label: "Dashboard", to: "/dashboard" },
-    { label: "Goals", to: "/goals" },
-    { label: "New Goal", to: "/goals/new" },
+    { label: "Dashboard", to: "/dashboard", end: true  },
+    { label: "New Goal", to: "/goals/new", end: true  },
+    { label: "Goals", to: "/goals", end: true  },
+    { label: "Completed quests", to: "/goals/completed", end: true  },
   ];
 
   function handleLogout() {
@@ -127,6 +128,7 @@ export default function AppLayout({ children }) {
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.end}
               className={({ isActive }) =>
                 classNames(
                   "flex items-center gap-2 rounded-md px-3 py-2 transition-colors",

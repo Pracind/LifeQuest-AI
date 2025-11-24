@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getGoals } from "../api";
+import { getGoals, deleteGoal } from "../api";
 
 function formatDate(dateString) {
   const date = new Date(dateString);
@@ -11,17 +11,10 @@ function formatDate(dateString) {
   });
 }
 
-function StatusBadge({ isConfirmed }) {
-  const label = isConfirmed ? "Active" : "Planning";
-  const colorClasses = isConfirmed
-    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
-    : "bg-amber-500/10 text-amber-300 border-amber-500/40";
-
+function StatusBadge() {
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${colorClasses}`}
-    >
-      {label}
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border bg-emerald-500/10 text-emerald-300 border-emerald-500/40">
+      Active
     </span>
   );
 }
@@ -31,6 +24,8 @@ export default function GoalsListPage() {
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -71,7 +66,34 @@ export default function GoalsListPage() {
 
   function handleOpen(goalId) {
   navigate(`/goals/${goalId}`);
-}
+  }
+
+  async function handleDelete(goalId) {
+    const ok = window.confirm(
+      "Delete this quest and all its progress? This cannot be undone."
+    );
+    if (!ok) return;
+
+    setMenuOpenId(null);
+    setDeletingId(goalId);
+
+    setGoals((prev) => {
+      window.__lastGoalsBackup = prev;
+      return prev.filter((g) => g.id !== goalId);
+    });
+
+    try {
+      await deleteGoal(goalId);
+      setGoals((prev) => prev.filter((g) => g.id !== goalId));
+    } catch (err) {
+      console.error("Failed to delete goal", err);
+      alert("Something went wrong while deleting the quest.");
+    
+    setGoals(window.__lastGoalsBackup || []);
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -122,14 +144,12 @@ export default function GoalsListPage() {
                 <li
                   key={goal.id}
                   onClick={() => handleOpen(goal.id)}
-                  className="rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-3 flex flex-col gap-1 cursor-pointer hover:border-blue-500/60 hover:bg-slate-900 transition-colors"
+                  className="relative rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-3 flex flex-col gap-1 cursor-pointer hover:border-blue-500/60 hover:bg-slate-900 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h2 className="text-sm font-semibold">
-                          {goal.title}
-                        </h2>
+                        <h2 className="text-sm font-semibold">{goal.title}</h2>
                         <StatusBadge isConfirmed={goal.is_confirmed} />
                       </div>
                       {goal.description && (
@@ -138,9 +158,22 @@ export default function GoalsListPage() {
                         </p>
                       )}
                     </div>
-                    <div className="text-right text-[11px] text-slate-500">
-                      <div>Created</div>
-                      <div>{formatDate(goal.created_at)}</div>
+                    <div className="flex items-start gap-2">
+                      <div className="text-right text-[11px] text-slate-500">
+                        <div>Created</div>
+                        <div>{formatDate(goal.created_at)}</div>
+                      </div>
+
+                      {/* 3-dots menu button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenId((prev) => (prev === goal.id ? null : goal.id));
+                        }}
+                        className="text-slate-400 hover:text-slate-100 px-1"
+                      >
+                        ⋮
+                      </button>
                     </div>
                   </div>
 
@@ -159,6 +192,24 @@ export default function GoalsListPage() {
                       View details →
                     </button>
                   </div>
+
+                  {menuOpenId === goal.id && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-3 top-10 z-10 w-40 rounded-md bg-slate-900 border border-slate-700 shadow-lg text-xs"
+                    >
+                      <button
+                        disabled={deletingId === goal.id}
+                        onClick={() => {
+                          if (deletingId === goal.id) return;
+                          handleDelete(goal.id);
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-300 disabled:opacity-60"
+                      >
+                        {deletingId === goal.id ? "Deleting..." : "Delete quest"}
+                      </button>
+                    </div>
+                  )}                        
                 </li>
               ))}
             </ul>

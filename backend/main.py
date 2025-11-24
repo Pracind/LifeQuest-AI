@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List
+
 from backend.db import get_db
 from backend import models
 from backend.security import hash_password, verify_password, create_access_token
@@ -29,7 +30,8 @@ from backend.schemas import (
     ReflectionOut,     
     UserProgress,
     StepOut,
-    XPSummary
+    XPSummary,
+    GoalCompletionSummary,
 )
 
 MAX_LEVEL = 60
@@ -136,12 +138,57 @@ def award_xp(
     return xp_log
 
 
-def _base_xp_for_step(step: models.Step) -> int:
-    if step.difficulty == models.DifficultyEnum.easy:
-        return 10
-    if step.difficulty == models.DifficultyEnum.medium:
-        return 20
-    return 40  # hard
+def build_goal_completion_summary(
+    goal: models.Goal,
+    steps: list[models.Step],
+    reflections: list[models.Reflection],
+) -> str:
+    """
+    Build a one-time summary string for a completed quest.
+    No external AI – purely rule-based.
+    """
+    total_steps = len(steps)
+    reflection_count = len(reflections)
+
+    step_titles = [f"{s.position}. {s.title}" for s in steps]
+    step_part = ""
+    if total_steps > 0:
+        if total_steps <= 5:
+            step_part = "You worked through these key steps:\n- " + "\n- ".join(
+                step_titles
+            )
+        else:
+            first_few = step_titles[:3]
+            step_part = (
+                f"You completed {total_steps} steps. Some highlights:\n- "
+                + "\n- ".join(first_few)
+                + "\n- ..."
+            )
+
+    reflection_part = ""
+    if reflection_count > 0:
+        snippets = []
+        for r in reflections[:3]:
+            txt = (r.text or "").strip().replace("\n", " ")
+            if len(txt) > 160:
+                txt = txt[:157] + "..."
+            if txt:
+                snippets.append(f"• {txt}")
+        if snippets:
+            reflection_part = (
+                f"\n\nYou also paused to reflect {reflection_count} time(s). "
+                "Some of the important things you wrote:\n"
+                + "\n".join(snippets)
+            )
+
+    summary_text = (
+        f"Well done! You finished the quest \"{goal.title}\".\n\n"
+        f"{step_part}{reflection_part}\n\n"
+        "Take a moment to appreciate the momentum you've built before you jump into the next quest."
+    )
+
+    return summary_text
+
 
 
 app = FastAPI(title="LifeQuest AI API")
@@ -314,7 +361,10 @@ def list_goals(
     """
     goals = (
         db.query(models.Goal)
-        .filter(models.Goal.user_id == current_user.id)
+        .filter(
+            models.Goal.user_id == current_user.id,
+            models.Goal.is_confirmed == True,
+        )
         .order_by(models.Goal.created_at.desc())
         .all()
     )
@@ -324,6 +374,30 @@ def list_goals(
             if s.substeps is None:
                 s.substeps = []
     return goals
+
+
+@app.get("/goals/completed", response_model=List[GoalOut])
+def get_completed_goals(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    goals = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.user_id == current_user.id,
+            models.Goal.completed_at.isnot(None),
+        )
+        .order_by(models.Goal.completed_at.desc())
+        .all()
+    )
+
+    for g in goals:
+        for s in g.steps:
+            if s.substeps is None:
+                s.substeps = []
+
+    return goals
+
 
 
 @app.get("/goals/{goal_id}", response_model=GoalOut)
@@ -375,6 +449,9 @@ def get_goal(
         # Attach user-specific flags directly to the ORM object
         step.is_started = bool(user_step and user_step.started_at)
         step.is_completed = bool(user_step and user_step.completed_at)
+
+        step.started_at = user_step.started_at if user_step else None
+        step.completed_at = user_step.completed_at if user_step else None
 
         # Reflection info
         reflection = (
@@ -938,3 +1015,234 @@ def get_xp_summary(
         next_level_xp=next_level_xp,
         progress_to_next=progress_to_next,
     )
+
+
+@app.delete("/goals/{goal_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_goal(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Permanently delete a goal and all its steps / XP / reflections for this user.
+    """
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not goal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Goal not found",
+        )
+
+    db.delete(goal)
+    db.commit()
+
+    # 204: no content
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/goals/{goal_id}/finish")
+def finish_goal(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # 1) Make sure goal belongs to user
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    # 2) Confirm ALL steps are completed by this user
+    incomplete_steps = (
+        db.query(models.Step)
+        .outerjoin(
+            models.UserStep,
+            (models.UserStep.step_id == models.Step.id)
+            & (models.UserStep.user_id == current_user.id),
+        )
+        .filter(models.Step.goal_id == goal.id)
+        .filter(
+            (models.UserStep.id.is_(None))
+            | (models.UserStep.completed_at.is_(None))
+        )
+        .count()
+    )
+
+    if incomplete_steps > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Goal cannot be finished until all steps are completed"
+        )
+
+    # 3) Total XP earned on this goal
+    total_goal_xp = (
+        db.query(func.coalesce(func.sum(models.XPLog.amount), 0))
+        .filter(models.XPLog.user_id == current_user.id)
+        .filter(models.XPLog.meta["goal_id"].as_string() == goal.id)
+        .scalar()
+    )
+
+    # 5% bonus, rounded to nearest 10
+    bonus = round((total_goal_xp * 0.05) / 10) * 10
+
+    if bonus > 0:
+        award_xp(
+            db=db,
+            user_id=current_user.id,
+            amount=bonus,
+            reason="goal_complete",
+            meta={"goal_id": goal.id, "bonus_percent": 5},
+        )
+
+    # 🔹 4) Build & save a permanent summary
+    steps = (
+        db.query(models.Step)
+        .filter(models.Step.goal_id == goal.id)
+        .order_by(models.Step.position.asc())
+        .all()
+    )
+
+    step_ids = [s.id for s in steps]
+
+    reflections = (
+        db.query(models.Reflection)
+        .filter(
+            models.Reflection.user_id == current_user.id,
+            models.Reflection.step_id.in_(step_ids),
+        )
+        .order_by(models.Reflection.id.asc())
+        .all()
+    )
+
+    summary_text = build_goal_completion_summary(goal, steps, reflections)
+    goal.completion_summary = summary_text
+
+    # 🔹 5) Mark goal as completed
+    goal.completed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(goal)
+
+    return {
+        "goal_id": goal.id,
+        "bonus_xp": int(bonus),
+        "completed_at": goal.completed_at,
+        "completion_summary": goal.completion_summary,
+    }
+
+
+
+
+@app.get(
+    "/goals/{goal_id}/completion-summary",
+    response_model=GoalCompletionSummary,
+)
+def get_goal_completion_summary(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Return a short textual summary of what the user did in this quest,
+    based on steps + reflections.
+    """
+    # 1) Ensure goal belongs to user
+    goal = (
+        db.query(models.Goal)
+        .filter(
+            models.Goal.id == goal_id,
+            models.Goal.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    if not goal.completed_at:
+        raise HTTPException(
+            status_code=400,
+            detail="Quest is not finished yet.",
+        )
+
+    # 2) Load steps in order
+    steps = (
+        db.query(models.Step)
+        .filter(models.Step.goal_id == goal.id)
+        .order_by(models.Step.position.asc())
+        .all()
+    )
+
+    step_ids = [s.id for s in steps]
+
+    # 3) Load this user's reflections for those steps
+    reflections = (
+        db.query(models.Reflection)
+        .filter(
+            models.Reflection.user_id == current_user.id,
+            models.Reflection.step_id.in_(step_ids),
+        )
+        .order_by(models.Reflection.created_at.asc())
+        .all()
+    )
+
+    # 4) Build a simple automatic summary (rule-based, "AI-ish")
+    total_steps = len(steps)
+    reflection_count = len(reflections)
+
+    step_titles = [f"{s.position}. {s.title}" for s in steps]
+    step_part = ""
+    if total_steps > 0:
+        if total_steps <= 5:
+            step_part = "You worked through these key steps:\n- " + "\n- ".join(
+                step_titles
+            )
+        else:
+            first_few = step_titles[:3]
+            step_part = (
+                f"You completed {total_steps} steps. Some highlights:\n- "
+                + "\n- ".join(first_few)
+                + "\n- ..."
+            )
+
+    reflection_part = ""
+    if reflection_count > 0:
+        snippets = []
+        for r in reflections[:3]:
+            txt = (r.text or "").strip().replace("\n", " ")
+            if len(txt) > 160:
+                txt = txt[:157] + "..."
+            if txt:
+                snippets.append(f"• {txt}")
+        if snippets:
+            reflection_part = (
+                f"\n\nYou also paused to reflect {reflection_count} time(s). "
+                "Some of the important things you wrote:\n"
+                + "\n".join(snippets)
+            )
+
+    summary_text = (
+        f"Well done! You finished the quest \"{goal.title}\".\n\n"
+        f"{step_part}{reflection_part}\n\n"
+        "Take a moment to appreciate the momentum you've built before you jump into the next quest."
+    )
+
+    return GoalCompletionSummary(
+        goal_id=goal.id,
+        summary_text=summary_text,
+    )
+
+

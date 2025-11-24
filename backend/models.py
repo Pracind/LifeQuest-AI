@@ -70,6 +70,9 @@ class Goal(Base):
     owner = relationship("User", back_populates="goals")
     steps = relationship("Step", back_populates="goal", cascade="all, delete-orphan", order_by="Step.position")
 
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    completion_summary = Column(Text, nullable=True)
+
     def __repr__(self):
         return f"<Goal id={self.id} title={self.title} user_id={self.user_id}>"
 

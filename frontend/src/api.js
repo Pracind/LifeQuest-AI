@@ -1,5 +1,6 @@
 const API_BASE = "http://localhost:8000";
 
+
 async function handleResponse(res) {
   const data = await res.json().catch(() => ({}));
 
@@ -163,3 +164,37 @@ export async function getXpSummary() {
 
   return handleResponse(res);
 }
+
+
+export async function deleteGoal(goalId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  // 204 has no body, but handleResponse can still be used if needed
+  if (res.status === 204) return;
+  return handleResponse(res);
+}
+
+
+export async function finishGoal(goalId) {
+  const res = await fetch(`${API_BASE}/goals/${goalId}/finish`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+
+export async function getCompletedGoals() {
+  const res = await fetch(`${API_BASE}/goals/completed`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
+
+
