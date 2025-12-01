@@ -37,7 +37,7 @@ export default function GoalsListPage() {
       try {
         const data = await getGoals();
         if (isMounted) {
-          setGoals(data || []);
+           setGoals((data || []).filter(g => !g.completed_at));
         }
       } catch (err) {
         if (isMounted) {

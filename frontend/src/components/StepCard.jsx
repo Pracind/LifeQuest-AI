@@ -5,7 +5,12 @@ const STATUS_IDLE = "idle";
 const STATUS_IN_PROGRESS = "in_progress";
 const STATUS_COMPLETED = "completed";
 
-export default function StepCard({ step, goalId, onStepUpdated }) {
+export default function StepCard({
+  step,
+  goalId,
+  onStepUpdated,
+  canStart = true,
+}) {
   const [status, setStatus] = useState(() => {
     if (step.is_completed) return STATUS_COMPLETED;
     if (step.is_started) return STATUS_IN_PROGRESS;
@@ -31,13 +36,14 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
   // --- Handlers with optimistic UI + patch back to parent ---------
 
   async function handleStart() {
+    if (!canStart) return;
+
     // optimistic UI: assume it works
     setStatus(STATUS_IN_PROGRESS);
     onStepUpdated?.({ is_started: true });
 
     try {
       await startStep(goalId, step.id);
-      // backend is in sync now; nothing else needed
     } catch (err) {
       console.error("Failed to start step", err);
       // rollback if request fails
@@ -56,7 +62,7 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
     try {
       await completeStep(goalId, step.id);
 
-      // 👇 tell the rest of the app that XP has changed
+      // notify XP has changed
       window.dispatchEvent(new Event("xp-updated"));
     } catch (err) {
       console.error("Failed to complete step", err);
@@ -80,7 +86,7 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
     try {
       await reflectOnStep(goalId, step.id, reflectionText);
 
-      // 👇 XP also changes when you add first reflection
+      // XP also changes on first reflection
       window.dispatchEvent(new Event("xp-updated"));
     } catch (err) {
       console.error("Failed to save reflection", err);
@@ -99,6 +105,14 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
 
   function renderPrimaryButton() {
     if (status === STATUS_IDLE) {
+      if (!canStart) {
+        return (
+          <div className="text-[10px] text-slate-500 italic">
+            Complete the previous step first
+          </div>
+        );
+      }
+
       return (
         <button
           onClick={handleStart}
@@ -121,7 +135,6 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
     }
 
     if (status === STATUS_COMPLETED) {
-      // If this step doesn't need reflection, just show Done
       if (!step.reflection_required) {
         return (
           <span className="text-xs px-3 py-2 border border-slate-700 rounded-md text-slate-300">
@@ -194,7 +207,6 @@ export default function StepCard({ step, goalId, onStepUpdated }) {
             <button
               onClick={() => {
                 setReflecting(false);
-                // revert to last saved reflection from backend/parent
                 setReflectionText(step.reflection_text || "");
               }}
               className="text-[11px] px-2 py-1 rounded border border-slate-700"

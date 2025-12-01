@@ -264,6 +264,112 @@ def _generate_with_groq(goal_title: str, goal_description: Optional[str]) -> Lis
 
 
 # ---------------------------------------------------------------------------
+# Goal completion summary
+# ---------------------------------------------------------------------------
+
+def _fallback_completion_summary(goal, steps, reflections) -> str:
+    """
+    Simple non-AI summary we can fall back to if Groq is not available.
+    """
+    total_steps = len(steps)
+    hard_count = sum(1 for s in steps if getattr(s, "difficulty", None) == Difficulty.hard)
+    easy_medium = total_steps - hard_count
+    reflection_count = len(reflections)
+
+    return (
+        f'You finished the quest "{goal.title}". '
+        f"You moved this from idea to done over {total_steps} quest step(s), "
+        f"including {hard_count} deeper challenge(s) and {easy_medium} lighter ones. "
+        f"Along the way you paused to reflect {reflection_count} time(s). "
+        "Take a moment to appreciate what you pulled off here before you jump into the next quest."
+    )
+
+
+def generate_completion_summary_for_goal(goal, steps, reflections) -> str:
+    """
+    Generate a warm, motivational completion summary using Groq if available.
+    Falls back to a simple template if AI fails or provider is not Groq.
+    """
+    provider = get_provider()
+    # If not using Groq, just return the fallback
+    if provider != AIProvider.groq:
+        logger.info("AI summary: provider is %s, using fallback summary", provider.value)
+        return _fallback_completion_summary(goal, steps, reflections)
+
+    # Build context for the model
+    step_titles = [s.title for s in steps[:12]]
+
+    reflection_snippets = []
+    for r in reflections[:10]:
+        text = getattr(r, "text", None)
+        if text:
+            t = text.strip().replace("\n", " ")
+            if len(t) > 200:
+                t = t[:197] + "..."
+            reflection_snippets.append(t)
+
+    system_msg = (
+        "You are a motivational reflection coach summarizing a completed goal.\n"
+        "Write a warm, natural 3–6 sentence summary.\n"
+        "- Do NOT list steps or bullets.\n"
+        "- Do NOT enumerate actions one by one.\n"
+        "Blend:\n"
+        "• celebration of completion\n"
+        "• the essence of what was accomplished overall\n"
+        "• themes from reflections, without quoting the user verbatim\n"
+        "End by gently encouraging momentum into the next quest.\n"
+    )
+
+    user_msg = f"""
+Goal title: {goal.title}
+Goal description: {goal.description or ""}
+
+Step titles (context only, NOT for output):
+{step_titles}
+
+Reflection themes (NOT quotes, just rough ideas):
+{reflection_snippets}
+"""
+
+    try:
+        if Groq is None:
+            raise RuntimeError("groq package is not installed")
+
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set")
+
+        client = Groq(api_key=api_key)
+
+        response = client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            temperature=0.85,
+            max_tokens=400,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+
+        message = response.choices[0].message
+        content = getattr(message, "content", None) or getattr(message, "text", None)
+        if not content:
+            raise RuntimeError("Groq response had no content")
+
+        summary = content.strip()
+        logger.info("AI summary: generated completion summary for goal %s", goal.id)
+        return summary
+
+    except Exception as exc:
+        logger.exception(
+            "AI summary: failed to generate with Groq for goal %s: %r. Using fallback.",
+            getattr(goal, "id", "unknown"),
+            exc,
+        )
+        return _fallback_completion_summary(goal, steps, reflections)
+
+
+# ---------------------------------------------------------------------------
 # Public entrypoint
 # ---------------------------------------------------------------------------
 
@@ -292,6 +398,10 @@ def generate_plan_for_goal(goal_title: str, goal_description: Optional[str]) -> 
             exc,
         )
         return _mock_plan(goal_title)
+    
+
+
+    
 
 
 # Quick manual test (optional)
@@ -302,3 +412,9 @@ if __name__ == "__main__":
     )
     for s in steps:
         print(s.position, s.title, f"({s.difficulty}, {s.est_time_minutes} min)")
+
+
+
+
+
+

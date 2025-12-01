@@ -4,16 +4,20 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List
+from groq import Groq
+import os
 
 from backend.db import get_db
 from backend import models
 from backend.security import hash_password, verify_password, create_access_token
 from backend.deps import get_current_user
-from backend.ai import generate_plan_for_goal
+from backend.ai import generate_plan_for_goal, generate_completion_summary_for_goal
 from datetime import datetime, timezone
 
 from fastapi.middleware.cors import CORSMiddleware
 from backend.logging_config import logger
+
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 from backend.schemas import (
     UserCreate,
@@ -136,59 +140,6 @@ def award_xp(
     )
     db.add(xp_log)
     return xp_log
-
-
-def build_goal_completion_summary(
-    goal: models.Goal,
-    steps: list[models.Step],
-    reflections: list[models.Reflection],
-) -> str:
-    """
-    Build a one-time summary string for a completed quest.
-    No external AI – purely rule-based.
-    """
-    total_steps = len(steps)
-    reflection_count = len(reflections)
-
-    step_titles = [f"{s.position}. {s.title}" for s in steps]
-    step_part = ""
-    if total_steps > 0:
-        if total_steps <= 5:
-            step_part = "You worked through these key steps:\n- " + "\n- ".join(
-                step_titles
-            )
-        else:
-            first_few = step_titles[:3]
-            step_part = (
-                f"You completed {total_steps} steps. Some highlights:\n- "
-                + "\n- ".join(first_few)
-                + "\n- ..."
-            )
-
-    reflection_part = ""
-    if reflection_count > 0:
-        snippets = []
-        for r in reflections[:3]:
-            txt = (r.text or "").strip().replace("\n", " ")
-            if len(txt) > 160:
-                txt = txt[:157] + "..."
-            if txt:
-                snippets.append(f"• {txt}")
-        if snippets:
-            reflection_part = (
-                f"\n\nYou also paused to reflect {reflection_count} time(s). "
-                "Some of the important things you wrote:\n"
-                + "\n".join(snippets)
-            )
-
-    summary_text = (
-        f"Well done! You finished the quest \"{goal.title}\".\n\n"
-        f"{step_part}{reflection_part}\n\n"
-        "Take a moment to appreciate the momentum you've built before you jump into the next quest."
-    )
-
-    return summary_text
-
 
 
 app = FastAPI(title="LifeQuest AI API")
@@ -361,9 +312,13 @@ def list_goals(
     """
     goals = (
         db.query(models.Goal)
+        .options(
+            joinedload(models.Goal.steps).joinedload(models.Step.user_steps)
+        )
         .filter(
             models.Goal.user_id == current_user.id,
             models.Goal.is_confirmed == True,
+            models.Goal.completed_at.is_(None),
         )
         .order_by(models.Goal.created_at.desc())
         .all()
@@ -373,6 +328,15 @@ def list_goals(
         for s in g.steps:
             if s.substeps is None:
                 s.substeps = []
+
+            user_step = next(
+                (us for us in s.user_steps if us.user_id == current_user.id),
+                None,
+            )
+
+            s.is_started = bool(user_step and user_step.started_at)
+            s.is_completed = bool(user_step and user_step.completed_at)
+            
     return goals
 
 
@@ -831,6 +795,31 @@ def start_step(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Step not found",
         )
+    
+    prev_step = (
+        db.query(models.Step)
+        .filter(
+            models.Step.goal_id == goal.id,
+            models.Step.position < step.position,
+        )
+        .order_by(models.Step.position.desc())
+        .first()
+    )
+
+    if prev_step:
+        prev_user_step = (
+            db.query(models.UserStep)
+            .filter(
+                models.UserStep.user_id == current_user.id,
+                models.UserStep.step_id == prev_step.id,
+            )
+            .first()
+        )
+        if not prev_user_step or prev_user_step.completed_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You need to complete earlier steps before starting this one.",
+            )
 
     user_step = (
         db.query(models.UserStep)
@@ -912,6 +901,31 @@ def complete_step(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Step not found",
         )
+    
+    prev_step = (
+        db.query(models.Step)
+        .filter(
+            models.Step.goal_id == goal.id,
+            models.Step.position < step.position,
+        )
+        .order_by(models.Step.position.desc())
+        .first()
+    )
+
+    if prev_step:
+        prev_user_step = (
+            db.query(models.UserStep)
+            .filter(
+                models.UserStep.user_id == current_user.id,
+                models.UserStep.step_id == prev_step.id,
+            )
+            .first()
+        )
+        if not prev_user_step or prev_user_step.completed_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You need to complete earlier steps before completing this one.",
+            )
 
     # 3) Get or create UserStep (progress row)
     user_step = (
@@ -1066,29 +1080,33 @@ def finish_goal(
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
 
-    # 2) Confirm ALL steps are completed by this user
-    incomplete_steps = (
+    # 2) Count how many steps exist for this goal
+    total_steps = (
         db.query(models.Step)
-        .outerjoin(
-            models.UserStep,
-            (models.UserStep.step_id == models.Step.id)
-            & (models.UserStep.user_id == current_user.id),
-        )
         .filter(models.Step.goal_id == goal.id)
+        .count()
+    )
+
+    # 3) Count how many of those steps this user has completed
+    completed_steps = (
+        db.query(models.UserStep)
+        .join(models.Step, models.Step.id == models.UserStep.step_id)
         .filter(
-            (models.UserStep.id.is_(None))
-            | (models.UserStep.completed_at.is_(None))
+            models.Step.goal_id == goal.id,
+            models.UserStep.user_id == current_user.id,
+            models.UserStep.completed_at.isnot(None),
         )
         .count()
     )
 
-    if incomplete_steps > 0:
+    # If there are steps, require all to be completed
+    if total_steps > 0 and completed_steps < total_steps:
         raise HTTPException(
             status_code=400,
-            detail="Goal cannot be finished until all steps are completed"
+            detail="Goal cannot be finished until all steps are completed",
         )
 
-    # 3) Total XP earned on this goal
+    # 4) Total XP earned on this goal (steps + reflections, etc.)
     total_goal_xp = (
         db.query(func.coalesce(func.sum(models.XPLog.amount), 0))
         .filter(models.XPLog.user_id == current_user.id)
@@ -1108,7 +1126,7 @@ def finish_goal(
             meta={"goal_id": goal.id, "bonus_percent": 5},
         )
 
-    # 🔹 4) Build & save a permanent summary
+    # 5) Load steps + reflections for summary
     steps = (
         db.query(models.Step)
         .filter(models.Step.goal_id == goal.id)
@@ -1116,22 +1134,19 @@ def finish_goal(
         .all()
     )
 
-    step_ids = [s.id for s in steps]
-
     reflections = (
         db.query(models.Reflection)
         .filter(
             models.Reflection.user_id == current_user.id,
-            models.Reflection.step_id.in_(step_ids),
+            models.Reflection.step_id.in_([s.id for s in steps]),
         )
-        .order_by(models.Reflection.id.asc())
+        .order_by(models.Reflection.created_at.asc())
         .all()
     )
 
-    summary_text = build_goal_completion_summary(goal, steps, reflections)
-    goal.completion_summary = summary_text
-
-    # 🔹 5) Mark goal as completed
+    # 6) Generate and store AI summary
+    summary = generate_completion_summary_for_goal(goal, steps, reflections)
+    goal.completion_summary = summary
     goal.completed_at = datetime.now(timezone.utc)
 
     db.commit()
@@ -1141,9 +1156,8 @@ def finish_goal(
         "goal_id": goal.id,
         "bonus_xp": int(bonus),
         "completed_at": goal.completed_at,
-        "completion_summary": goal.completion_summary,
+        "summary_text": summary,
     }
-
 
 
 
@@ -1156,11 +1170,6 @@ def get_goal_completion_summary(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """
-    Return a short textual summary of what the user did in this quest,
-    based on steps + reflections.
-    """
-    # 1) Ensure goal belongs to user
     goal = (
         db.query(models.Goal)
         .filter(
@@ -1178,7 +1187,14 @@ def get_goal_completion_summary(
             detail="Quest is not finished yet.",
         )
 
-    # 2) Load steps in order
+    # If we already have a stored summary, just return it
+    if goal.completion_summary:
+        return GoalCompletionSummary(
+            goal_id=goal.id,
+            summary_text=goal.completion_summary,
+        )
+
+    # Otherwise, generate once (for old quests), store, and return
     steps = (
         db.query(models.Step)
         .filter(models.Step.goal_id == goal.id)
@@ -1186,63 +1202,25 @@ def get_goal_completion_summary(
         .all()
     )
 
-    step_ids = [s.id for s in steps]
-
-    # 3) Load this user's reflections for those steps
     reflections = (
         db.query(models.Reflection)
         .filter(
             models.Reflection.user_id == current_user.id,
-            models.Reflection.step_id.in_(step_ids),
+            models.Reflection.step_id.in_([s.id for s in steps]),
         )
         .order_by(models.Reflection.created_at.asc())
         .all()
     )
 
-    # 4) Build a simple automatic summary (rule-based, "AI-ish")
-    total_steps = len(steps)
-    reflection_count = len(reflections)
+    summary = generate_completion_summary_for_goal(goal, steps, reflections)
+    goal.completion_summary = summary
 
-    step_titles = [f"{s.position}. {s.title}" for s in steps]
-    step_part = ""
-    if total_steps > 0:
-        if total_steps <= 5:
-            step_part = "You worked through these key steps:\n- " + "\n- ".join(
-                step_titles
-            )
-        else:
-            first_few = step_titles[:3]
-            step_part = (
-                f"You completed {total_steps} steps. Some highlights:\n- "
-                + "\n- ".join(first_few)
-                + "\n- ..."
-            )
-
-    reflection_part = ""
-    if reflection_count > 0:
-        snippets = []
-        for r in reflections[:3]:
-            txt = (r.text or "").strip().replace("\n", " ")
-            if len(txt) > 160:
-                txt = txt[:157] + "..."
-            if txt:
-                snippets.append(f"• {txt}")
-        if snippets:
-            reflection_part = (
-                f"\n\nYou also paused to reflect {reflection_count} time(s). "
-                "Some of the important things you wrote:\n"
-                + "\n".join(snippets)
-            )
-
-    summary_text = (
-        f"Well done! You finished the quest \"{goal.title}\".\n\n"
-        f"{step_part}{reflection_part}\n\n"
-        "Take a moment to appreciate the momentum you've built before you jump into the next quest."
-    )
+    db.commit()
+    db.refresh(goal)
 
     return GoalCompletionSummary(
         goal_id=goal.id,
-        summary_text=summary_text,
+        summary_text=summary,
     )
 
 

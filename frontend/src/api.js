@@ -196,5 +196,14 @@ export async function getCompletedGoals() {
   return handleResponse(res);
 }
 
+export async function getXpLogs() {
+  const res = await fetch(`${API_BASE}/xp/logs`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
 
 

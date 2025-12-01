@@ -4,6 +4,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import StepCard from "../components/StepCard";
 import { getGoal, deleteGoal, finishGoal } from "../api";
 
+function isStepCompleted(step) {
+  if (!step) return false;
+  if (typeof step.is_completed === "boolean") return step.is_completed;
+  if (typeof step.completed === "boolean") return step.completed;
+  if (typeof step.status === "string") return step.status === "completed";
+  return false;
+}
+
 export default function GoalDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -33,7 +41,7 @@ export default function GoalDetailPage() {
 
     try {
       const data = await getGoal(id);
-      console.log("Loaded goal detail:", data); // 👈 see exactly what backend sends
+      console.log("Loaded goal detail:", data);
       setGoal(data);
     } catch (err) {
       console.error("Failed to load goal", err);
@@ -43,7 +51,6 @@ export default function GoalDetailPage() {
       setLoading(false);
     }
   }
-
 
   async function handleDeleteGoal() {
     if (!goal || deleting) return;
@@ -66,7 +73,6 @@ export default function GoalDetailPage() {
     }
   }
 
-
   async function handleFinishGoal() {
     try {
       const res = await finishGoal(goal.id);
@@ -78,7 +84,6 @@ export default function GoalDetailPage() {
     }
   }
 
-
   useEffect(() => {
     loadGoal();
   }, [id]);
@@ -87,22 +92,15 @@ export default function GoalDetailPage() {
   if (error) return <div className="text-red-300 text-sm">{error}</div>;
   if (!goal) return <div>Goal not found</div>;
 
-  // --- Progress calculation ---
   const steps = Array.isArray(goal.steps) ? goal.steps : [];
 
-  const completedCount = steps.filter((s) => {
-    if (typeof s.is_completed === "boolean") return s.is_completed;
-    if (typeof s.completed === "boolean") return s.completed;
-    if (typeof s.status === "string") return s.status === "completed";
-    return false;
-  }).length;
-
+  const completedCount = steps.filter(isStepCompleted).length;
   const totalSteps = steps.length;
   const progress =
     totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
 
   const timelineItems = steps
-    .filter((s) => s.completed_at) 
+    .filter((s) => s.completed_at)
     .slice()
     .sort(
       (a, b) =>
@@ -136,15 +134,6 @@ export default function GoalDetailPage() {
         </div>
       </div>
 
-      {progress === 100 && !goal.completed_at && (
-        <button
-          onClick={handleFinishGoal}
-          className="text-xs px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500"
-        >
-          Finish Quest 🎉
-        </button>
-      )}
-
       {/* Completion summary – only for finished quests */}
       {goal.completed_at && goal.completion_summary && (
         <div className="mt-4 bg-slate-900/70 border border-emerald-500/50 rounded-xl p-4">
@@ -156,7 +145,6 @@ export default function GoalDetailPage() {
           </p>
         </div>
       )}
-
 
       {/* Timeline – only show for completed steps */}
       {timelineItems.length > 0 && (
@@ -180,24 +168,43 @@ export default function GoalDetailPage() {
         </div>
       )}
 
-
       {/* Steps */}
       <div className="space-y-4">
         {steps.length > 0 ? (
-          steps.map((step) => (
-            <StepCard
-              key={step.id}
-              step={step}
-              goalId={goal.id}
-              onStepUpdated={(patch) =>
-                handleStepLocallyUpdated(step.id, patch)
-              }
-            />
-          ))
+          steps.map((step, index) => {
+            const prevCompleted =
+              index === 0
+                ? true
+                : steps.slice(0, index).every((s) => isStepCompleted(s));
+
+            return (
+              <StepCard
+                key={step.id}
+                step={step}
+                goalId={goal.id}
+                canStart={prevCompleted}
+                onStepUpdated={(patch) =>
+                  handleStepLocallyUpdated(step.id, patch)
+                }
+              />
+            );
+          })
         ) : (
           <p className="text-sm text-slate-500">No steps yet</p>
         )}
       </div>
+
+      {/* Finish quest button at the bottom */}
+      {progress === 100 && !goal.completed_at && (
+        <div className="pt-2">
+          <button
+            onClick={handleFinishGoal}
+            className="text-xs px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500"
+          >
+            Finish Quest 🎉
+          </button>
+        </div>
+      )}
     </div>
   );
 }
