@@ -22,6 +22,9 @@ pytest_cache/
 *.sqlite
 *.sqlite3
 
+# allow production env, public API URL
+!.env.production
+
 # Migrations
 alembic/*
 !alembic/versions/
