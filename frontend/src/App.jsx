@@ -7,6 +7,8 @@ import GoalsListPage from "./pages/GoalsList";
 import AppLayout from "./components/AppLayout";
 import GoalDetailPage from "./pages/GoalDetail";
 import CompletedQuestsPage from "./pages/CompletedQuestPage";
+import SettingsPage from "./pages/SettingsPage";
+
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("access_token");
@@ -78,6 +80,17 @@ export default function App() {
         </RequireAuth>
       }
     />
+
+    <Route
+        path="/settings"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <SettingsPage />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
 
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>

@@ -206,4 +206,22 @@ export async function getXpLogs() {
 }
 
 
+export async function getMe() {
+  return apiRequest("/me");
+}
 
+// Update profile (display_name, avatar_url)
+export async function updateProfile(data) {
+  return apiRequest("/me", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+// Change password
+export async function changePassword(data) {
+  return apiRequest("/me/change-password", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

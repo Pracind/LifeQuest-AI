@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, constr
 
 
 class UserCreate(BaseModel):
@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     email: EmailStr
     display_name: Optional[str] = None
     created_at: datetime
+    avatar_url: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -149,3 +150,13 @@ class XPSummary(BaseModel):
 class GoalCompletionSummary(BaseModel):
     goal_id: str
     summary_text: str
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None   # simple URL/string for profile pic
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: constr(min_length=8)

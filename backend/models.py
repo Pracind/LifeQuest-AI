@@ -51,6 +51,8 @@ class User(Base):
     goals = relationship("Goal", back_populates="owner", cascade="all, delete-orphan")
     xp_logs = relationship("XPLog", back_populates="user", cascade="all, delete-orphan")
 
+    avatar_url = Column(String, nullable=True)
+
     def __repr__(self):
         return f"<User id={self.id} email={self.email}>"
 

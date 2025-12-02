@@ -36,6 +36,8 @@ from backend.schemas import (
     StepOut,
     XPSummary,
     GoalCompletionSummary,
+    UserUpdate,
+    PasswordChange,
 )
 
 MAX_LEVEL = 60
@@ -1222,5 +1224,42 @@ def get_goal_completion_summary(
         goal_id=goal.id,
         summary_text=summary,
     )
+
+
+
+@app.patch("/me", response_model=UserOut)
+def update_me(
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Update display name and avatar URL."""
+    if payload.display_name is not None:
+        current_user.display_name = payload.display_name.strip() or None
+
+    if payload.avatar_url is not None:
+        current_user.avatar_url = payload.avatar_url.strip() or None
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_my_password(
+    payload: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Change password after verifying current one."""
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    current_user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
 
 

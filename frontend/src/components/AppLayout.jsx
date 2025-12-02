@@ -8,8 +8,49 @@ function classNames(...classes) {
 
 export default function AppLayout({ children }) {
   const navigate = useNavigate();
-  const email = localStorage.getItem("user_email") || "adventurer@lifequest.ai";
-  const initials = email[0]?.toUpperCase() || "L";
+  const [user, setUser] = useState({
+    email: "",
+    display_name: "",
+    avatar_url: "",
+  });
+
+  async function loadUser() {
+    try {
+      const res = await fetch("http://localhost:8000/me", {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
+      });
+      const data = await res.json();
+      setUser(data);
+      localStorage.setItem("user_email", data.email);
+      localStorage.setItem("user_name", data.display_name || "");
+      localStorage.setItem("avatar_url", data.avatar_url || "");
+    } catch (err) {
+      console.error("Failed to load user info", err);
+    }
+  }
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  // 🔔 listen for profile updates from SettingsPage
+  useEffect(() => {
+    function handleProfileUpdated(e) {
+      if (e.detail) {
+        setUser(e.detail);
+      } else {
+        // fallback: re-fetch from backend
+        loadUser();
+      }
+    }
+    window.addEventListener("profile-updated", handleProfileUpdated);
+    return () =>
+      window.removeEventListener("profile-updated", handleProfileUpdated);
+  }, []);
+
+  const initials = user.display_name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "L";
 
   const [xpState, setXpState] = useState({
     loading: true,
@@ -94,13 +135,28 @@ export default function AppLayout({ children }) {
         </div>
 
         <div className="px-5 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-sm font-bold">
-              {initials}
-            </div>
+          <div
+            className="flex items-center gap-3 mb-3 cursor-pointer hover:opacity-90"
+            onClick={() => navigate("/settings")}
+          >
+            {user.avatar_url ? (
+              <img
+                src={user.avatar_url}
+                alt="avatar"
+                className="h-10 w-10 rounded-full object-cover"
+              />
+            ) : (
+              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-sm font-bold">
+                {initials}
+              </div>
+            )}
+
             <div className="flex-1">
               <div className="text-xs text-slate-400">Logged in as</div>
-              <div className="text-sm font-medium truncate">{email}</div>
+              <div className="text-sm font-medium truncate">{user.display_name || user.email}</div>
+              <div className="text-[10px] text-blue-300 mt-0.5">
+                Open settings →
+              </div>
             </div>
           </div>
 

@@ -20,6 +20,27 @@ export default function SignupPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    // Password validation
+    if (form.password.length < 6) {
+      setError("Password must be at least 6 characters long.");
+      return;
+    }
+
+    // Example stronger password rule (optional)
+    const numberRegex = /\d/;
+    if (!numberRegex.test(form.password)) {
+      setError("Password must contain at least one number.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -28,10 +49,10 @@ export default function SignupPage() {
         password: form.password,
         displayName: form.displayName,
       });
-      // after signup, send to login
+
       navigate("/login");
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
