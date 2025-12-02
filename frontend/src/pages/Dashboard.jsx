@@ -340,9 +340,9 @@ export default function DashboardPage() {
         )}
 
         {/* Token debug (kept from your original) */}
-        <p className="text-xs text-slate-500 break-all mt-4">
+        {/* <p className="text-xs text-slate-500 break-all mt-4">
           Current token (localStorage): {token ? token : "No token found"}
-        </p>
+        </p> */}
       </div>
     </div>
   );
