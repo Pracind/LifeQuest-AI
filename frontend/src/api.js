@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:8000";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 
 async function handleResponse(res) {
@@ -205,6 +206,18 @@ export async function getXpLogs() {
   return handleResponse(res);
 }
 
+async function apiRequest(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {}),
+    },
+    body: options.body,
+  });
+
+  return handleResponse(res);
+}
 
 export async function getMe() {
   return apiRequest("/me");
