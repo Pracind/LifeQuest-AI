@@ -1,0 +1,50 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.7.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 60s
+          script: |
+            set -euo pipefail
+            echo "Deploy started on $(date)"
+            cd /var/www/lifequest
+
+            # Ensure we have exactly the remote code
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            # Create venv if missing
+            if [ ! -d "backend/venv" ]; then
+              python3 -m venv backend/venv
+            fi
+
+            # Activate and install
+            source backend/venv/bin/activate
+            pip install --upgrade pip wheel
+            pip install -r backend/requirements.txt
+
+            # Reload systemd and restart service
+            sudo systemctl daemon-reload
+            sudo systemctl restart lifequest
+            sudo systemctl status lifequest --no-pager --lines=20
+
+            echo "Deploy finished on $(date)"
