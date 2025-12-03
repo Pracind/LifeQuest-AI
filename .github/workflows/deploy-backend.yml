@@ -4,6 +4,9 @@ on:
   push:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -15,36 +18,49 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1.7.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          timeout: 60s
-          script: |
-            set -euo pipefail
-            echo "Deploy started on $(date)"
-            cd /var/www/lifequest
+      - name: Prepare SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # add github runner's SSH config for host key checking (optional)
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts || true
+          # show limited debug (do NOT print the key)
+          ls -la ~/.ssh
 
-            # Ensure we have exactly the remote code
+      - name: Deploy to EC2 (run remote commands)
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          set -euo pipefail
+          echo "SSH to $EC2_USER@$EC2_HOST and deploy..."
+
+          ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" bash -s <<'REMOTE'
+            set -euxo pipefail
+            echo "Deploy started on $(date)"
+            cd /var/www/lifequest || { echo "path missing"; exit 2; }
+
+            # ensure exact code
             git fetch --all --prune
             git reset --hard origin/main
 
-            # Create venv if missing
+            # create venv if missing
             if [ ! -d "backend/venv" ]; then
               python3 -m venv backend/venv
             fi
 
-            # Activate and install
+            # activate and install
             source backend/venv/bin/activate
             pip install --upgrade pip wheel
             pip install -r backend/requirements.txt
 
-            # Reload systemd and restart service
+            # reload systemd and restart service
             sudo systemctl daemon-reload
             sudo systemctl restart lifequest
             sudo systemctl status lifequest --no-pager --lines=20
 
             echo "Deploy finished on $(date)"
+          REMOTE
