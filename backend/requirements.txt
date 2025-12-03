@@ -9,3 +9,5 @@ groq
 
 pydantic
 psycopg2-binary  # only used if you connect to Postgres
+
+email-validator
