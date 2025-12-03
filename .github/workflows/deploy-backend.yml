@@ -43,6 +43,9 @@ jobs:
             echo "Deploy started on $(date)"
             cd /var/www/lifequest || { echo "path missing"; exit 2; }
 
+            # fix: mark this repo safe for this user to avoid "dubious ownership" errors
+            git config --global --add safe.directory /var/www/lifequest
+
             # ensure exact code
             git fetch --all --prune
             git reset --hard origin/main
