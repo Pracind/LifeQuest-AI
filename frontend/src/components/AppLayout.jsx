@@ -84,13 +84,58 @@ export default function AppLayout({ children }) {
 
   // listen for "xp-updated" from StepCard and refresh XP
   useEffect(() => {
-    function handleXpUpdated() {
-      loadXp();
-    }
+  // sequence token to ignore stale fetch results
+  let seq = 0;
+  let mounted = true;
 
-    window.addEventListener("xp-updated", handleXpUpdated);
-    return () => window.removeEventListener("xp-updated", handleXpUpdated);
-  }, []);
+  async function refreshXp() {
+    const mySeq = ++seq;
+    try {
+      const data = await getXpSummary();
+      // ignore if a newer refresh started or component unmounted
+      if (!mounted || mySeq !== seq) return;
+
+      setXpState({
+        loading: false,
+        level: data.level,
+        current_level_xp: data.current_level_xp,
+        next_level_xp: data.next_level_xp,
+        progress_to_next: data.progress_to_next,
+      });
+      console.debug("AppLayout: refreshed XP from server", data);
+    } catch (err) {
+      console.error("AppLayout: failed to refresh XP", err);
+      if (mounted) setXpState((prev) => ({ ...prev, loading: false }));
+    }
+  }
+
+  function handleXpUpdatedEvent(e) {
+    console.debug("AppLayout heard xp-updated event", e);
+    // always refresh from server when step card signals xp changed
+    refreshXp();
+  }
+
+  // catch events on both window and document to be extra robust
+  window.addEventListener("xp-updated", handleXpUpdatedEvent);
+  document.addEventListener("xp-updated", handleXpUpdatedEvent);
+
+  // also refresh when tab becomes visible (useful for multi-tab)
+  function handleVisibility() {
+    if (document.visibilityState === "visible") {
+      refreshXp();
+    }
+  }
+  document.addEventListener("visibilitychange", handleVisibility);
+
+  return () => {
+    mounted = false;
+    // increment seq so any in-flight promise is ignored
+    seq++;
+    window.removeEventListener("xp-updated", handleXpUpdatedEvent);
+    document.removeEventListener("xp-updated", handleXpUpdatedEvent);
+    document.removeEventListener("visibilitychange", handleVisibility);
+  };
+}, []);
 
   
 

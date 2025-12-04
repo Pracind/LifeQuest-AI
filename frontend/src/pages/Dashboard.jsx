@@ -25,15 +25,23 @@ function getLast7Days() {
       today.getMonth(),
       today.getDate() - i
     );
-    const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    // build local YYYY-MM-DD
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const key = `${y}-${m}-${dd}`;
+
     const label = d.toLocaleDateString(undefined, {
       weekday: "short",
     });
-    days.push({ key, label });
+    days.push({ key, label, dateObj: d }); // keep dateObj if needed
   }
 
   return days;
 }
+
+
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -55,9 +63,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let isMounted = true;
+    let seq = 0;
 
     async function load() {
       setLoading(true);
+      const mySeq = ++seq;
       try {
         const [summary, active, completed, logs] = await Promise.all([
           getXpSummary(),
@@ -65,8 +75,7 @@ export default function DashboardPage() {
           getCompletedGoals(),
           getXpLogs(),
         ]);
-
-        if (!isMounted) return;
+        if (!isMounted || mySeq !== seq) return;
 
         setXpSummary(summary);
         setActiveGoals(active || []);
@@ -75,22 +84,48 @@ export default function DashboardPage() {
       } catch (err) {
         console.error("Failed to load dashboard data", err);
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted && mySeq === seq) setLoading(false);
       }
     }
 
+    // initial load
     load();
 
-    // react to XP updates from StepCard
-    function handleXpUpdated() {
-      getXpSummary().then(setXpSummary).catch(console.error);
-      getXpLogs().then(setXpLogs).catch(console.error);
+    // react to XP updates from StepCard (plain Event supported)
+    async function handleXpUpdatedEvent(e) {
+      console.debug("DashboardPage heard xp-updated event", e);
+
+      // quick path: re-fetch latest summary + logs concurrently (race-safe)
+      const mySeq = ++seq;
+      try {
+        const [summary, logs] = await Promise.all([getXpSummary(), getXpLogs()]);
+        if (!isMounted || mySeq !== seq) return;
+
+        setXpSummary(summary);
+        setXpLogs(logs);
+        console.debug("DashboardPage: refreshed summary and logs after xp-updated");
+      } catch (err) {
+        console.error("DashboardPage: failed to refresh after xp-updated", err);
+      }
     }
-    window.addEventListener("xp-updated", handleXpUpdated);
+
+    window.addEventListener("xp-updated", handleXpUpdatedEvent);
+    document.addEventListener("xp-updated", handleXpUpdatedEvent);
+
+    // also refresh when tab becomes visible
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        load();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       isMounted = false;
-      window.removeEventListener("xp-updated", handleXpUpdated);
+      seq++;
+      window.removeEventListener("xp-updated", handleXpUpdatedEvent);
+      document.removeEventListener("xp-updated", handleXpUpdatedEvent);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
@@ -100,10 +135,23 @@ export default function DashboardPage() {
   const xpByDay = last7.map((day) => {
     const totalForDay = xpLogs
       .filter((log) => {
-        const created = log.created_at || log.createdAt;
+        // try multiple possible timestamp fields
+        const created = log.created_at ?? log.createdAt ?? log.timestamp ?? log.time;
+
         if (!created) return false;
-        const dayKey = String(created).slice(0, 10); // YYYY-MM-DD
-        return dayKey === day.key;
+
+        // parse into Date (works for ISO strings and numeric timestamps)
+        const createdDate = new Date(created);
+
+        if (Number.isNaN(createdDate.getTime())) return false;
+
+        // build local YYYY-MM-DD from the log's created date
+        const y = createdDate.getFullYear();
+        const m = String(createdDate.getMonth() + 1).padStart(2, "0");
+        const dd = String(createdDate.getDate()).padStart(2, "0");
+        const logKey = `${y}-${m}-${dd}`;
+
+        return logKey === day.key;
       })
       .reduce((sum, log) => sum + (log.amount || 0), 0);
 
